@@ -33,6 +33,16 @@ from core.pipeline.content_pipeline import (
 from core.content.generator import PROGRAMMING_TOPICS, get_random_topic
 from platforms.youtube.service import YouTubeService
 
+import click
+from core.tasks.content_tasks import (
+    generate_content_task,
+    generate_and_upload_content_task,
+    check_content_schedule,
+    batch_generate_content,
+)
+from core.tasks.analytics_tasks import collect_all_metrics
+from core.tasks.maintenance_tasks import system_health_check
+
 load_dotenv()
 
 
