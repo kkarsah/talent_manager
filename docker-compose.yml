@@ -1,0 +1,63 @@
+# docker-compose.yml
+
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./data/talent_manager.db
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./content:/app/content
+      - ./logs:/app/logs
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  # Optional: PostgreSQL for production
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: talent_manager
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  # Optional: Celery worker for background tasks
+  worker:
+    build: .
+    command: celery -A core.tasks.celery_app worker --loglevel=info
+    environment:
+      - DATABASE_URL=sqlite:///./data/talent_manager.db
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./content:/app/content
+      - ./logs:/app/logs
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  postgres_data:
