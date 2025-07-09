@@ -1,0 +1,227 @@
+# talents/tech_educator/api.py
+"""
+Alex CodeMaster API Routes
+Contains all API endpoints specific to Alex CodeMaster
+"""
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
+from pydantic import BaseModel
+from typing import Optional
+import logging
+
+from core.pipeline.enhanced_content_pipeline import EnhancedContentPipeline
+from core.database import get_db_session
+from .alex_codemaster import AlexCodeMaster
+
+logger = logging.getLogger(__name__)
+
+# Create Alex-specific router
+alex_router = APIRouter(prefix="/api/alex", tags=["Alex CodeMaster"])
+
+# Enhanced pipeline instance (will be initialized in main.py)
+enhanced_pipeline: Optional[EnhancedContentPipeline] = None
+
+
+def init_alex_api(pipeline: EnhancedContentPipeline):
+    """Initialize Alex API with enhanced pipeline"""
+    global enhanced_pipeline
+    enhanced_pipeline = pipeline
+
+
+# Pydantic models for API requests
+class AlexContentRequest(BaseModel):
+    topic: Optional[str] = None
+    content_type: str = "long_form"
+    auto_upload: bool = False
+    use_runway: bool = True
+
+
+class AlexPerformanceUpdate(BaseModel):
+    content_id: int
+    views: Optional[int] = None
+    likes: Optional[int] = None
+    comments: Optional[int] = None
+    engagement_rate: Optional[float] = None
+
+
+# API Endpoints
+@alex_router.post("/generate")
+async def generate_alex_content(
+    request: AlexContentRequest, background_tasks: BackgroundTasks
+):
+    """Generate content for Alex CodeMaster using enhanced pipeline"""
+    if not enhanced_pipeline:
+        raise HTTPException(status_code=500, detail="Enhanced pipeline not initialized")
+
+    # Start enhanced generation in background
+    background_tasks.add_task(
+        process_alex_enhanced_content,
+        request.topic,
+        request.content_type,
+        request.auto_upload,
+        request.use_runway,
+    )
+
+    return {
+        "success": True,
+        "message": "Alex CodeMaster enhanced content generation started",
+        "topic": request.topic or "Auto-generated tech topic",
+        "content_type": request.content_type,
+        "runway_enabled": request.use_runway and enhanced_pipeline.runway_enabled,
+        "estimated_time": "8-15 minutes with Runway, 3-5 minutes without",
+    }
+
+
+@alex_router.get("/status")
+async def get_alex_status():
+    """Get Alex's enhanced system status"""
+    if not enhanced_pipeline:
+        return {"status": "not_initialized"}
+
+    alex = enhanced_pipeline.alex_codemaster
+
+    return {
+        "status": "ready",
+        "talent": {
+            "name": alex.personality.name,
+            "specialization": alex.personality.specialization,
+            "expertise_areas": alex.personality.expertise_areas,
+            "voice_provider": alex.config["voice_settings"]["provider"],
+        },
+        "capabilities": {
+            "runway_enabled": enhanced_pipeline.runway_enabled,
+            "tts_enabled": enhanced_pipeline.tts_service is not None,
+            "youtube_enabled": enhanced_pipeline.youtube_service.is_authenticated(),
+        },
+        "content_strategy": alex.get_content_strategy(),
+        "posting_schedule": alex.get_posting_schedule(),
+    }
+
+
+@alex_router.get("/content/history")
+async def get_alex_content_history(limit: int = 10, db_session=Depends(get_db_session)):
+    """Get Alex's content history"""
+    from .models import AlexContent
+
+    content_history = (
+        db_session.query(AlexContent)
+        .order_by(AlexContent.generated_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    return {
+        "content": [
+            {
+                "id": c.id,
+                "title": c.title,
+                "topic": c.topic,
+                "content_type": c.content_type,
+                "duration": c.total_duration if hasattr(c, "total_duration") else 0,
+                "views": c.views,
+                "likes": c.likes,
+                "engagement_rate": c.engagement_rate,
+                "generated_at": c.generated_at,
+                "status": c.status,
+                "runway_used": c.runway_used,
+                "youtube_url": c.youtube_url,
+            }
+            for c in content_history
+        ]
+    }
+
+
+@alex_router.put("/content/performance")
+async def update_alex_performance(
+    request: AlexPerformanceUpdate, db_session=Depends(get_db_session)
+):
+    """Update content performance metrics"""
+    from .models import AlexContent
+
+    content = (
+        db_session.query(AlexContent)
+        .filter(AlexContent.id == request.content_id)
+        .first()
+    )
+    if not content:
+        raise HTTPException(status_code=404, detail="Content not found")
+
+    # Update performance fields
+    performance_data = {
+        k: v for k, v in request.dict().items() if v is not None and k != "content_id"
+    }
+
+    for key, value in performance_data.items():
+        if hasattr(content, key):
+            setattr(content, key, value)
+
+    db_session.commit()
+
+    return {
+        "success": True,
+        "message": f"Performance updated for content {request.content_id}",
+        "updated_fields": list(performance_data.keys()),
+    }
+
+
+# Background task functions
+async def process_alex_enhanced_content(
+    topic: Optional[str], content_type: str, auto_upload: bool, use_runway: bool
+):
+    """Background task for Alex's enhanced content generation"""
+    try:
+        result = await enhanced_pipeline.create_enhanced_content(
+            talent_name="alex_codemaster",
+            topic=topic,
+            content_type=content_type,
+            auto_upload=auto_upload,
+            use_runway=use_runway,
+        )
+
+        if result.get("success"):
+            logger.info(f"✅ Alex enhanced content completed: {result['title']}")
+            logger.info(f"Runway used: {result.get('runway_used', False)}")
+            logger.info(f"Scenes generated: {result.get('scenes_generated', 0)}")
+
+            # Save to Alex-specific database table
+            await _save_alex_content_record(result)
+        else:
+            logger.error(f"❌ Alex enhanced content failed: {result.get('error')}")
+
+    except Exception as e:
+        logger.error(f"❌ Alex enhanced content generation error: {e}")
+
+
+async def _save_alex_content_record(result: dict):
+    """Save Alex content to database"""
+    try:
+        from core.database import get_db_session
+        from .models import AlexContent
+        from datetime import datetime
+
+        db_session = next(get_db_session())
+
+        content = AlexContent(
+            title=result.get("title"),
+            description=result.get("description"),
+            topic=result.get("topic"),
+            content_type=result.get("content_type"),
+            personality_version="1.0",
+            generated_at=datetime.utcnow(),
+            runway_used=result.get("runway_used", False),
+            scenes_generated=result.get("scenes_generated", 0),
+            video_path=result.get("video_path"),
+            audio_path=result.get("audio_path"),
+            thumbnail_path=result.get("thumbnail_path"),
+            youtube_video_id=result.get("youtube_video_id"),
+            youtube_url=result.get("youtube_url"),
+            status="completed" if result.get("success") else "failed",
+        )
+
+        db_session.add(content)
+        db_session.commit()
+
+        logger.info(f"💾 Alex content saved to database: ID {content.id}")
+
+    except Exception as e:
+        logger.error(f"Error saving Alex content to database: {e}")

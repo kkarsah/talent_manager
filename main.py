@@ -7,11 +7,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 from typing import Optional
-from datetime import datetime  # Add this import
+from datetime import datetime
+
 
 # Core imports that should work
 from core.database.config import get_db, init_db, SessionLocal  # Single import line
 from core.database.models import Talent, ContentItem
+from core.api import router as core_router
+from talents.tech_educator.api import setup_alex_integration
 
 # Load environment variables
 load_dotenv()
@@ -22,10 +25,14 @@ logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Talent Manager API",
+    title="Talent Manager",
     description="AI Talent Manager System for Autonomous Content Creation",
     version="1.0.0",
 )
+
+app.include_router(core_router)
+
+alex_pipeline = setup_alex_integration(app)
 
 # Add CORS middleware
 app.add_middleware(
@@ -340,7 +347,7 @@ async def generate_content_now(
 async def create_alex_codemaster(db: Session = Depends(get_db)):
     """Create Alex CodeMaster talent"""
     try:
-        from talents.education_specialist.alex_codemaster import AlexCodeMasterProfile
+        from talents.tech_educator.alex_codemaster import AlexCodeMasterProfile
 
         # Check if Alex already exists
         existing = db.query(Talent).filter(Talent.name == "Alex CodeMaster").first()
@@ -571,6 +578,40 @@ async def get_install_guide():
             "4. Restart the API server",
         ],
     }
+
+
+# main.py (your existing main file - add these lines)
+"""
+Integration with your existing main.py FastAPI application
+"""
+
+from fastapi import FastAPI
+from core.pipeline.enhanced_content_pipeline import EnhancedContentPipeline
+from talents.tech_educator.api import alex_router, init_alex_api
+
+
+def setup_alex_integration(app: FastAPI):
+    """Set up Alex CodeMaster integration with main FastAPI app"""
+
+    # Initialize enhanced pipeline
+    enhanced_pipeline = EnhancedContentPipeline()
+
+    # Initialize Alex API with the pipeline
+    init_alex_api(enhanced_pipeline)
+
+    # Include Alex's router
+    app.include_router(alex_router)
+
+    # Create database tables
+    from core.database import engine
+    from talents.tech_educator.models import AlexContent
+    from core.models import Base
+
+    Base.metadata.create_all(bind=engine)
+
+    logger.info("✅ Alex CodeMaster integration initialized")
+
+    return enhanced_pipeline
 
 
 if __name__ == "__main__":

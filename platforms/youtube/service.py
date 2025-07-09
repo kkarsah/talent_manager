@@ -33,10 +33,10 @@ class YouTubeService:
         )
         self.client_id = os.getenv("YOUTUBE_CLIENT_ID")
         self.client_secret = os.getenv("YOUTUBE_CLIENT_SECRET")
-        
+
         # Support both desktop and web app flows
         self.auth_mode = os.getenv("YOUTUBE_AUTH_MODE", "desktop")  # desktop or web
-        
+
         if self.auth_mode == "desktop":
             self.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
         else:
@@ -78,14 +78,15 @@ class YouTubeService:
 
             # Generate authorization URL
             authorization_url, _ = flow.authorization_url(
-                access_type="offline", 
-                include_granted_scopes="true"
+                access_type="offline", include_granted_scopes="true"
             )
 
             print(f"\n🔗 Please visit this URL to authorize the application:")
             print(f"{authorization_url}")
-            print(f"\nAfter authorization, you'll see an authorization code on the page.")
-            
+            print(
+                f"\nAfter authorization, you'll see an authorization code on the page."
+            )
+
             # Get authorization code from user
             authorization_code = input("\nEnter the authorization code: ").strip()
 
@@ -163,9 +164,7 @@ class YouTubeService:
 
             # Run local server (this opens browser automatically)
             credentials = flow.run_local_server(
-                port=8080, 
-                open_browser=True,
-                prompt="select_account"
+                port=8080, open_browser=True, prompt="select_account"
             )
 
             # Save credentials
@@ -289,7 +288,7 @@ class YouTubeService:
             # Start upload
             logger.info(f"Starting YouTube upload: {title}")
             print(f"📤 Uploading video: {title}")
-            
+
             request = self.service.videos().insert(
                 part=",".join(body.keys()), body=body, media_body=media
             )
@@ -350,11 +349,9 @@ class YouTubeService:
         """Upload thumbnail for a video"""
         try:
             media = MediaFileUpload(thumbnail_path, mimetype="image/*")
-            
-            request = self.service.thumbnails().set(
-                videoId=video_id, media_body=media
-            )
-            
+
+            request = self.service.thumbnails().set(videoId=video_id, media_body=media)
+
             response = request.execute()
             logger.info(f"Thumbnail uploaded for video {video_id}")
             return True
@@ -369,9 +366,7 @@ class YouTubeService:
             return None
 
         try:
-            request = self.service.channels().list(
-                part="snippet,statistics", mine=True
-            )
+            request = self.service.channels().list(part="snippet,statistics", mine=True)
             response = request.execute()
 
             if response["items"]:
@@ -418,7 +413,7 @@ class YouTubeService:
 
             # Get video statistics
             video_ids = [item["id"]["videoId"] for item in search_response["items"]]
-            
+
             if not video_ids:
                 return []
 
@@ -457,9 +452,7 @@ class YouTubeService:
             return None
 
         try:
-            request = self.service.videos().list(
-                part="statistics,snippet", id=video_id
-            )
+            request = self.service.videos().list(part="statistics,snippet", id=video_id)
             response = request.execute()
 
             if response["items"]:
@@ -499,12 +492,12 @@ class YouTubeService:
             return False
 
     async def update_video(
-        self, 
-        video_id: str, 
+        self,
+        video_id: str,
         title: Optional[str] = None,
         description: Optional[str] = None,
         tags: Optional[List[str]] = None,
-        privacy_status: Optional[str] = None
+        privacy_status: Optional[str] = None,
     ) -> bool:
         """Update video metadata"""
         if not self.service:
@@ -536,11 +529,7 @@ class YouTubeService:
             # Update video
             update_request = self.service.videos().update(
                 part="snippet,status",
-                body={
-                    "id": video_id,
-                    "snippet": snippet,
-                    "status": status
-                }
+                body={"id": video_id, "snippet": snippet, "status": status},
             )
             update_request.execute()
 

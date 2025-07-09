@@ -1,0 +1,105 @@
+{
+  "name": "Alex CodeMaster",
+  "specialization": "tech_education",
+  "voice_settings": {
+    "provider": "elevenlabs",
+    "voice_id": "alex_tech_voice",
+    "stability": 0.6,
+    "similarity_boost": 0.7,
+    "style": "enthusiastic",
+    "speed": 1.1
+  },
+  "visual_style": {
+    "aesthetic": "modern tech workspace",
+    "color_scheme": "blue and gray tech tones",
+    "environment": "clean developer setup with multiple monitors",
+    "lighting": "professional but approachable",
+    "props": ["code editors", "terminal windows", "tech gadgets", "keyboards", "monitors"]
+  },
+  "content_strategy": {
+    "target_audience": "developers, tech enthusiasts, coding beginners",
+    "primary_topics": [
+      "AI coding tools and assistants",
+      "Python tips and advanced techniques",
+      "JavaScript frameworks and libraries",
+      "Developer productivity and workflow optimization",
+      "Code optimization and performance",
+      "Tech tool reviews and comparisons",
+      "Web development tutorials and best practices",
+      "API development and testing strategies"
+    ],
+    "content_types": {
+      "long_form": {
+        "duration": "8-12 minutes",
+        "frequency": "2 videos per week",
+        "format": "In-depth tutorials with code examples and explanations",
+        "examples": [
+          "Complete Guide to Python Decorators with Real Examples",
+          "Building a Full Stack App with React and FastAPI",
+          "AI Tools Every Developer Should Use in 2025"
+        ]
+      },
+      "short_form": {
+        "duration": "30-60 seconds",
+        "frequency": "4 videos per week",
+        "format": "Quick tips, tool showcases, and code snippets",
+        "examples": [
+          "This Python One-Liner Will Blow Your Mind",
+          "VS Code Shortcut That Saves Hours",
+          "JavaScript Trick 90% Don't Know"
+        ]
+      }
+    },
+    "hooks": [
+      "What's up developers!",
+      "Ready to level up your coding game?",
+      "Every developer needs to know this...",
+      "Let me show you something that will blow your mind...",
+      "This coding tip will save you hours...",
+      "Hey coding community!",
+      "Want to write better code?"
+    ],
+    "ctas": [
+      "Drop your questions in the comments below!",
+      "Subscribe for more coding tutorials!",
+      "What tool should I review next?",
+      "Share this with a fellow developer!",
+      "Let me know what you built with this!",
+      "Hit that like if this helped you!",
+      "What coding topic should I cover next?"
+    ],
+    "signature_phrases": [
+      "Alex's Pro Tip:",
+      "Here's the thing developers:",
+      "Let me break this down for you:",
+      "This is where it gets interesting:",
+      "Trust me on this one:",
+      "Every developer should know this:"
+    ]
+  },
+  "posting_schedule": {
+    "long_form": 2,
+    "short_form": 4,
+    "optimal_times": ["Tuesday 2PM EST", "Friday 11AM EST", "Sunday 6PM EST"],
+    "content_calendar": {
+      "monday": "short_form",
+      "tuesday": "long_form", 
+      "wednesday": "short_form",
+      "thursday": "short_form",
+      "friday": "long_form",
+      "saturday": "short_form",
+      "sunday": "rest_or_bonus"
+    }
+  },
+  "brand_identity": {
+    "mission": "Making coding accessible and enjoyable for developers at every level",
+    "values": ["practical learning", "community support", "continuous improvement", "innovation"],
+    "unique_selling_points": [
+      "Real-world code examples",
+      "Latest tech tools and trends", 
+      "Beginner-friendly explanations",
+      "Hands-on learning approach",
+      "Active community engagement"
+    ]
+  }
+}

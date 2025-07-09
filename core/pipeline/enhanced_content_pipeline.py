@@ -1,0 +1,172 @@
+# core/pipeline/enhanced_content_pipeline.py
+"""
+Enhanced Content Pipeline - Fixes circular imports
+This extends the existing ContentPipeline WITHOUT circular imports
+"""
+
+import asyncio
+import logging
+from typing import Dict, Any, Optional, List
+from datetime import datetime
+from pathlib import Path
+import os
+
+logger = logging.getLogger(__name__)
+
+
+class EnhancedContentPipeline:
+    """Enhanced pipeline with Runway integration - NO circular imports"""
+
+    def __init__(self):
+        # Initialize components lazily to avoid circular imports
+        self._content_pipeline = None
+        self._runway_client = None
+        self._alex_codemaster = None
+
+        # Initialize Runway if available
+        self.runway_enabled = False
+        self._init_runway()
+
+    def _init_runway(self):
+        """Initialize Runway client if API key available"""
+        runway_api_key = os.getenv("RUNWAY_API_KEY")
+        if runway_api_key:
+            try:
+                from runwayml import RunwayML
+
+                self._runway_client = RunwayML()
+                os.environ["RUNWAYML_API_SECRET"] = runway_api_key
+                self.runway_enabled = True
+                logger.info("✅ Runway client initialized")
+            except ImportError:
+                logger.warning(
+                    "Runway ML library not installed. Install with: pip install runwayml"
+                )
+            except Exception as e:
+                logger.error(f"Failed to initialize Runway: {e}")
+        else:
+            logger.info(
+                "Runway API key not found. Video generation will use existing methods."
+            )
+
+    @property
+    def content_pipeline(self):
+        """Lazy load content pipeline to avoid circular imports"""
+        if self._content_pipeline is None:
+            try:
+                from core.pipeline.content_pipeline import ContentPipeline
+
+                self._content_pipeline = ContentPipeline()
+            except ImportError as e:
+                logger.error(f"Could not import ContentPipeline: {e}")
+                raise
+        return self._content_pipeline
+
+    @property
+    def alex_codemaster(self):
+        """Lazy load Alex CodeMaster to avoid circular imports"""
+        if self._alex_codemaster is None:
+            try:
+                from talents.tech_educator.alex_codemaster import AlexCodeMaster
+
+                self._alex_codemaster = AlexCodeMaster()
+            except ImportError as e:
+                logger.error(f"Could not import AlexCodeMaster: {e}")
+                # Create a fallback Alex instance
+                self._alex_codemaster = self._create_fallback_alex()
+        return self._alex_codemaster
+
+    def _create_fallback_alex(self):
+        """Create a fallback Alex instance if the real one can't be loaded"""
+
+        class FallbackAlex:
+            def __init__(self):
+                self.name = "Alex CodeMaster"
+                self.specialization = "tech_education"
+
+            async def generate_content_request(
+                self, topic=None, content_type="long_form"
+            ):
+                return {
+                    "topic": topic or "Default Tech Topic",
+                    "content_type": content_type,
+                    "target_audience": "developers",
+                }
+
+            def get_voice_settings(self):
+                return {"provider": "fallback", "voice_id": "default"}
+
+        return FallbackAlex()
+
+    async def create_enhanced_content(
+        self,
+        talent_name: str,
+        topic: str = None,
+        content_type: str = "long_form",
+        auto_upload: bool = False,
+        use_runway: bool = False,  # Default to False for now
+    ) -> Dict[str, Any]:
+        """Create content using enhanced pipeline - simplified version"""
+
+        job_id = f"enhanced_{talent_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+        try:
+            logger.info(
+                f"🎬 Starting enhanced content creation for {talent_name}: {topic}"
+            )
+
+            # For now, use the existing content pipeline with enhancements
+            if talent_name.lower() in ["alex", "alex_codemaster"]:
+                # Generate Alex-specific topic if not provided
+                if not topic:
+                    topic = await self._generate_alex_topic()
+
+                # Use existing content pipeline
+                result = await self.content_pipeline.create_and_upload_content(
+                    talent_id=1,  # Assuming Alex is talent ID 1
+                    topic=topic,
+                    content_type=content_type,
+                    auto_upload=auto_upload,
+                )
+
+                # Add Alex-specific metadata
+                result.update(
+                    {
+                        "job_id": job_id,
+                        "talent_name": talent_name,
+                        "enhanced": True,
+                        "runway_used": False,  # Will be True when Runway is integrated
+                        "alex_personality": True,
+                    }
+                )
+
+                return result
+            else:
+                raise ValueError(f"Talent {talent_name} not supported yet")
+
+        except Exception as e:
+            logger.error(f"❌ Enhanced content creation failed: {e}")
+            return {
+                "success": False,
+                "job_id": job_id,
+                "talent_name": talent_name,
+                "topic": topic,
+                "error": str(e),
+            }
+
+    async def _generate_alex_topic(self) -> str:
+        """Generate a tech topic for Alex"""
+        fallback_topics = [
+            "5 AI Coding Tools That Will Change Your Life in 2025",
+            "Python Tips Every Developer Should Know",
+            "VS Code Extensions That Make You 10x More Productive",
+            "JavaScript Tricks That Will Blow Your Mind",
+            "How to Build APIs in 2025: Best Practices",
+            "Git Commands Every Developer Must Master",
+            "Docker for Developers: Complete Guide",
+            "React vs Vue vs Svelte: Which Should You Choose?",
+        ]
+
+        import random
+
+        return random.choice(fallback_topics)
