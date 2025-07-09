@@ -28,6 +28,9 @@ class YouTubeService:
     """YouTube API integration for video uploads and management"""
 
     def __init__(self):
+        self.credentials_file_path = os.getenv(
+            "YOUTUBE_CREDENTIALS_FILE", "credentials/youtube_credentials.json"
+        )
         self.client_id = os.getenv("YOUTUBE_CLIENT_ID")
         self.client_secret = os.getenv("YOUTUBE_CLIENT_SECRET")
         self.redirect_uri = os.getenv(
@@ -364,3 +367,34 @@ class YouTubeService:
     def is_authenticated(self) -> bool:
         """Check if YouTube is authenticated"""
         return self.service is not None and self.credentials is not None
+
+    async def authenticate_with_file(self) -> str:
+        """Authenticate using credentials file"""
+        try:
+            credentials_path = Path(self.credentials_file_path)
+            if not credentials_path.exists():
+                raise FileNotFoundError(
+                    f"Credentials file not found: {self.credentials_file_path}"
+                )
+
+            # Create flow from credentials file
+            flow = InstalledAppFlow.from_client_secrets_file(
+                str(credentials_path), SCOPES
+            )
+
+            # Run local server flow
+            credentials = flow.run_local_server(port=8080)
+
+            # Save credentials for future use
+            await self._save_credentials(credentials)
+
+            # Build service
+            self.service = build("youtube", "v3", credentials=credentials)
+            self.credentials = credentials
+
+            logger.info("YouTube authentication successful!")
+            return "Authentication successful"
+
+        except Exception as e:
+            logger.error(f"YouTube authentication failed: {e}")
+            raise

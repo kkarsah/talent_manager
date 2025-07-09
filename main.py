@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 from typing import Optional
+from datetime import datetime
 
 # Core imports that should work
 from core.database.config import get_db, init_db
@@ -402,6 +403,258 @@ async def generate_content_now(
         raise HTTPException(
             status_code=500, detail=f"Content generation failed: {str(e)}"
         )
+
+
+# Add these endpoints to your main.py (before the final if __name__ == "__main__":)
+
+
+# YouTube Authentication and Upload Endpoints
+@app.post("/youtube/authenticate")
+async def youtube_authenticate():
+    """Authenticate with YouTube using credentials file"""
+    try:
+        result = await youtube_service.authenticate_with_file()
+        return {"message": result, "status": "success"}
+    except Exception as e:
+        logger.error(f"YouTube authentication failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Authentication failed: {str(e)}")
+
+
+@app.get("/youtube/status")
+async def youtube_status():
+    """Check YouTube authentication status"""
+    try:
+        is_auth = youtube_service.is_authenticated()
+        if not is_auth:
+            # Try to load existing credentials
+            await youtube_service.load_credentials()
+            is_auth = youtube_service.is_authenticated()
+
+        return {
+            "authenticated": is_auth,
+            "service_available": YOUTUBE_AVAILABLE,
+            "credentials_file": os.getenv("YOUTUBE_CREDENTIALS_FILE", "Not set"),
+        }
+    except Exception as e:
+        return {"authenticated": False, "error": str(e)}
+
+
+@app.post("/content/{content_id}/upload")
+async def upload_content_to_youtube(content_id: int, db: Session = Depends(get_db)):
+    """Upload specific content to YouTube"""
+    try:
+        # Get content item
+        content = db.query(ContentItem).filter(ContentItem.id == content_id).first()
+        if not content:
+            raise HTTPException(status_code=404, detail="Content not found")
+
+        # Check if content has video file
+        if not content.video_url:
+            raise HTTPException(status_code=400, detail="Content has no video file")
+
+        # Check if already uploaded
+        if content.platform_url:
+            return {
+                "message": "Content already uploaded",
+                "youtube_url": f"https://youtube.com/watch?v={content.platform_url}",
+                "content_id": content_id,
+            }
+
+        # Prepare upload data
+        video_path = content.video_url
+        title = content.title
+        description = (
+            content.description
+            or f"Educational content by Alex CodeMaster\n\n{content.title}"
+        )
+        tags = (
+            content.tags
+            if hasattr(content, "tags") and content.tags
+            else ["programming", "tutorial", "education"]
+        )
+
+        # Upload to YouTube
+        video_id = await youtube_service.upload_video(
+            video_path=video_path,
+            title=title,
+            description=description,
+            tags=tags,
+            thumbnail_path=content.thumbnail_url,
+        )
+
+        if video_id:
+            # Update content with YouTube URL
+            content.platform_url = video_id
+            content.status = "published"
+            content.published_at = datetime.now()
+            db.commit()
+
+            youtube_url = f"https://youtube.com/watch?v={video_id}"
+
+            return {
+                "message": "Upload successful",
+                "youtube_url": youtube_url,
+                "video_id": video_id,
+                "content_id": content_id,
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Upload failed")
+
+    except Exception as e:
+        logger.error(f"YouTube upload failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
+@app.post("/content/upload-batch")
+async def upload_batch_to_youtube(
+    talent_id: Optional[int] = None, limit: int = 5, db: Session = Depends(get_db)
+):
+    """Upload multiple completed content items to YouTube"""
+    try:
+        # Get content ready for upload
+        query = db.query(ContentItem).filter(
+            ContentItem.video_url.isnot(None),  # Has video
+            ContentItem.platform_url.is_(None),  # Not uploaded yet
+            ContentItem.status == "generated",  # Completed
+        )
+
+        if talent_id:
+            query = query.filter(ContentItem.talent_id == talent_id)
+
+        content_items = query.limit(limit).all()
+
+        if not content_items:
+            return {"message": "No content ready for upload", "uploaded": 0, "total": 0}
+
+        uploaded_count = 0
+        results = []
+
+        for content in content_items:
+            try:
+                # Upload this content
+                video_id = await youtube_service.upload_video(
+                    video_path=content.video_url,
+                    title=content.title,
+                    description=content.description
+                    or f"Educational content by Alex CodeMaster\n\n{content.title}",
+                    tags=["programming", "tutorial", "education"],
+                    thumbnail_path=content.thumbnail_url,
+                )
+
+                if video_id:
+                    content.platform_url = video_id
+                    content.status = "published"
+                    content.published_at = datetime.now()
+                    uploaded_count += 1
+
+                    results.append(
+                        {
+                            "content_id": content.id,
+                            "title": content.title,
+                            "youtube_url": f"https://youtube.com/watch?v={video_id}",
+                            "status": "success",
+                        }
+                    )
+                else:
+                    results.append(
+                        {
+                            "content_id": content.id,
+                            "title": content.title,
+                            "status": "failed",
+                            "error": "Upload returned no video ID",
+                        }
+                    )
+
+            except Exception as e:
+                logger.error(f"Failed to upload content {content.id}: {e}")
+                results.append(
+                    {
+                        "content_id": content.id,
+                        "title": content.title,
+                        "status": "failed",
+                        "error": str(e),
+                    }
+                )
+
+        db.commit()
+
+        return {
+            "message": f"Batch upload completed: {uploaded_count}/{len(content_items)} successful",
+            "uploaded": uploaded_count,
+            "total": len(content_items),
+            "results": results,
+        }
+
+    except Exception as e:
+        logger.error(f"Batch upload failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Batch upload failed: {str(e)}")
+
+
+@app.post("/content/generate-and-upload")
+async def generate_and_upload_to_youtube(
+    talent_id: int,
+    topic: Optional[str] = None,
+    content_type: str = "long_form",
+    db: Session = Depends(get_db),
+):
+    """Generate content and automatically upload to YouTube"""
+    try:
+        # Validate talent exists
+        talent = db.query(Talent).filter(Talent.id == talent_id).first()
+        if not talent:
+            raise HTTPException(status_code=404, detail="Talent not found")
+
+        # Generate content
+        result = await quick_generate_and_upload(talent_id, topic, content_type)
+
+        # Get the created content item
+        if result.get("content_id"):
+            content = (
+                db.query(ContentItem)
+                .filter(ContentItem.id == result["content_id"])
+                .first()
+            )
+
+            if content and content.video_url:
+                # Upload to YouTube
+                try:
+                    video_id = await youtube_service.upload_video(
+                        video_path=content.video_url,
+                        title=content.title,
+                        description=content.description
+                        or f"Educational content by {talent.name}\n\n{content.title}",
+                        tags=["programming", "tutorial", "education"],
+                        thumbnail_path=content.thumbnail_url,
+                    )
+
+                    if video_id:
+                        content.platform_url = video_id
+                        content.status = "published"
+                        content.published_at = datetime.now()
+                        db.commit()
+
+                        result["youtube_upload"] = {
+                            "video_id": video_id,
+                            "url": f"https://youtube.com/watch?v={video_id}",
+                            "status": "success",
+                        }
+
+                except Exception as upload_error:
+                    logger.error(f"YouTube upload failed: {upload_error}")
+                    result["youtube_upload"] = {
+                        "status": "failed",
+                        "error": str(upload_error),
+                    }
+
+        return {
+            "message": "Content generated and upload attempted",
+            "generation_result": result,
+            "topic": topic or "random topic",
+        }
+
+    except Exception as e:
+        logger.error(f"Generate and upload failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Operation failed: {str(e)}")
 
 
 if __name__ == "__main__":

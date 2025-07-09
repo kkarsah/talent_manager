@@ -53,6 +53,7 @@ class ContentItem(Base):
     video_url = Column(String(255))
     audio_url = Column(String(255))
     thumbnail_url = Column(String(255))
+    platform_url = Column(String(255))
     status = Column(
         String(50), default="draft"
     )  # draft, generated, uploaded, published
