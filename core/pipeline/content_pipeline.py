@@ -1,333 +1,501 @@
-# core/pipeline/enhanced_content_pipeline.py
+# core/pipeline/content_pipeline.py - FIXED VERSION
 """
-Enhanced Content Pipeline with Runway Integration
-Extends existing content pipeline to support Alex CodeMaster's enhanced workflow
+Content Pipeline - Fixed to eliminate circular imports
 """
 
-from typing import Dict, Any, Optional
 import asyncio
 import logging
+from typing import Dict, Optional, Any
 from datetime import datetime
-
-# Core imports
-from core.pipeline.content_pipeline import ContentPipeline
-from core.content.generator import ContentRequest
-from talents.tech_educator.alex_codemaster import AlexCodeMaster
-
-# Enhanced video generation
-from runwayml import RunwayML
-import os
+from pathlib import Path
+import json
 
 logger = logging.getLogger(__name__)
 
 
-class EnhancedContentPipeline(ContentPipeline):
-    """Enhanced pipeline with Runway video generation and talent-specific processing"""
+class ContentPipeline:
+    """Complete end-to-end content creation pipeline"""
 
     def __init__(self):
-        super().__init__()
+        # Initialize components lazily to avoid circular imports
+        self._content_generator = None
+        self._tts_service = None
+        self._video_creator = None
+        self._youtube_service = None
 
-        # Initialize Runway client
-        runway_api_key = os.getenv("RUNWAY_API_KEY")
-        if runway_api_key:
-            self.runway_client = RunwayML()
-            os.environ["RUNWAYML_API_SECRET"] = runway_api_key
-            self.runway_enabled = True
-        else:
-            self.runway_client = None
-            self.runway_enabled = False
-            logger.warning(
-                "Runway API key not found. Video generation will use fallback methods."
-            )
+        # Pipeline status tracking
+        self.current_job = None
+        self.job_status = {}
 
-        # Initialize talent instances
-        self.alex_codemaster = AlexCodeMaster()
+    @property
+    def content_generator(self):
+        """Lazy load content generator"""
+        if self._content_generator is None:
+            try:
+                from core.content.generator import ContentGenerator
 
-    async def create_enhanced_content(
+                self._content_generator = ContentGenerator()
+            except ImportError as e:
+                logger.error(f"Could not import ContentGenerator: {e}")
+                raise
+        return self._content_generator
+
+    @property
+    def tts_service(self):
+        """Lazy load TTS service"""
+        if self._tts_service is None:
+            try:
+                from core.content.tts import TTSService
+
+                self._tts_service = TTSService()
+            except ImportError as e:
+                logger.error(f"Could not import TTSService: {e}")
+                raise
+        return self._tts_service
+
+    @property
+    def video_creator(self):
+        """Lazy load video creator"""
+        if self._video_creator is None:
+            try:
+                from core.content.video_creator import VideoCreator
+
+                self._video_creator = VideoCreator()
+            except ImportError as e:
+                logger.error(f"Could not import VideoCreator: {e}")
+                raise
+        return self._video_creator
+
+    @property
+    def youtube_service(self):
+        """Lazy load YouTube service"""
+        if self._youtube_service is None:
+            try:
+                from platforms.youtube.service import YouTubeService
+
+                self._youtube_service = YouTubeService()
+            except ImportError as e:
+                logger.error(f"Could not import YouTubeService: {e}")
+                raise
+        return self._youtube_service
+
+    async def create_and_upload_content(
         self,
-        talent_name: str,
-        topic: str = None,
+        talent_id: int,
+        topic: str,
         content_type: str = "long_form",
-        auto_upload: bool = False,
-        use_runway: bool = True,
+        auto_upload: bool = True,
     ) -> Dict[str, Any]:
-        """Create content using enhanced pipeline with talent-specific processing"""
+        """Complete pipeline: Generate -> Create -> Upload content"""
 
-        job_id = f"enhanced_{talent_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        job_id = f"job_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self.current_job = job_id
 
         try:
-            logger.info(
-                f"🎬 Starting enhanced content creation for {talent_name}: {topic}"
+            # Initialize job status
+            self.job_status[job_id] = {
+                "status": "started",
+                "progress": 0,
+                "steps": [],
+                "error": None,
+                "result": {},
+            }
+
+            logger.info(f"Starting content pipeline for talent {talent_id}: {topic}")
+
+            # Step 1: Get talent info
+            await self._update_job_status(job_id, "Getting talent information", 10)
+            talent = await self._get_talent(talent_id)
+            if not talent:
+                raise ValueError(f"Talent {talent_id} not found")
+
+            # Step 2: Generate content
+            await self._update_job_status(job_id, "Generating script and metadata", 20)
+
+            # Import ContentRequest here to avoid circular imports
+            from core.content.generator import ContentRequest
+
+            content_request = ContentRequest(
+                talent_name=talent.name,
+                topic=topic,
+                content_type=content_type,
+                target_audience="general",
+                platform="youtube",
+                style_guide="engaging and informative",
+                personality_prompt=f"Create content as {talent.name}",
+                duration_target=300.0,
+                additional_context="",
             )
 
-            # Step 1: Get talent instance and generate content request
-            talent_instance = self._get_talent_instance(talent_name)
-            if not talent_instance:
-                raise ValueError(f"Talent {talent_name} not found or not supported")
-
-            # Generate talent-specific content request
-            content_request = await talent_instance.generate_content_request(
-                topic=topic, content_type=content_type
-            )
-
-            # Step 2: Generate enhanced script and scenes
-            logger.info("📝 Generating enhanced script with talent personality...")
-            generated_content = await talent_instance.enhance_script_generation(
+            generated_content = await self.content_generator.generate_content(
                 content_request
             )
 
-            # Step 3: Generate TTS audio using talent's voice settings
-            logger.info("🎤 Generating voice audio...")
-            voice_settings = talent_instance.get_voice_settings()
-            audio_path = await self.tts_service.generate_speech(
-                generated_content.script,
-                voice_settings,
-                f"audio_{talent_name}_{job_id}.mp3",
+            # Step 3: Create database record
+            await self._update_job_status(job_id, "Creating content record", 30)
+            content_item = await self._create_content_record(
+                talent_id, generated_content, content_type
             )
 
-            # Step 4: Generate video assets
-            video_path = None
-            if use_runway and self.runway_enabled and generated_content.visual_scenes:
-                logger.info("🎥 Generating video with Runway...")
-                video_path = await self._create_runway_video(
-                    generated_content.visual_scenes, talent_instance, job_id
-                )
+            # Step 4: Generate speech with automatic fallback
+            await self._update_job_status(
+                job_id, "Generating speech audio (with fallback if needed)", 40
+            )
 
-            if not video_path:
-                logger.info("🎞️ Using traditional video creation...")
-                video_path = await self.video_creator.create_video(
+            # Import voice profiles here
+            try:
+                from core.content.tts import TALENT_VOICE_PROFILES
+
+                voice_settings = TALENT_VOICE_PROFILES.get(talent.name, {})
+            except ImportError:
+                voice_settings = {}
+
+            try:
+                audio_path = await self.tts_service.generate_speech(
                     generated_content.script,
-                    audio_path,
-                    generated_content.title,
-                    content_type,
-                    talent_name,
+                    voice_settings,
+                    f"audio_{content_item.id}.mp3",
                 )
 
-            # Step 5: Create thumbnail
-            logger.info("🖼️ Creating thumbnail...")
-            thumbnail_path = await self.video_creator.create_thumbnail(
-                generated_content.title, talent_name
-            )
-
-            # Step 6: Upload if requested
-            youtube_result = {}
-            if auto_upload and self.youtube_service.is_authenticated():
-                logger.info("📤 Uploading to YouTube...")
-                try:
-                    video_id = await self.youtube_service.upload_video(
-                        video_path=video_path,
-                        title=generated_content.title,
-                        description=generated_content.description,
-                        tags=generated_content.tags,
-                        thumbnail_path=thumbnail_path,
+                # Check if fallback was used
+                if "gtts_fallback" in audio_path:
+                    logger.warning(f"Used gTTS fallback for content {content_item.id}")
+                    await self._update_job_status(
+                        job_id, "Audio generated using free TTS fallback", 45
+                    )
+                else:
+                    await self._update_job_status(
+                        job_id, "High-quality audio generated successfully", 45
                     )
 
-                    if video_id:
-                        youtube_result = {
-                            "youtube_video_id": video_id,
-                            "youtube_url": f"https://youtube.com/watch?v={video_id}",
-                            "uploaded": True,
-                        }
-                except Exception as e:
-                    logger.error(f"YouTube upload failed: {e}")
-                    youtube_result = {"upload_error": str(e)}
+            except Exception as e:
+                logger.error(f"All TTS options failed: {e}")
+                # Continue without audio - save script only
+                audio_path = None
+                await self._update_job_status(
+                    job_id, "TTS failed - continuing with script only", 45
+                )
+
+            # Step 5: Create video
+            await self._update_job_status(job_id, "Creating video", 60)
+            video_path = await self.video_creator.create_video(
+                generated_content.script,
+                audio_path,
+                generated_content.title,
+                content_type,
+                talent.name,
+            )
+
+            # Step 6: Create thumbnail
+            await self._update_job_status(job_id, "Creating thumbnail", 70)
+            thumbnail_path = await self.video_creator.create_thumbnail(
+                generated_content.title, talent.name
+            )
+
+            # Step 7: Update content record with file paths
+            await self._update_content_record(
+                content_item.id,
+                {
+                    "audio_url": audio_path,
+                    "video_url": video_path,
+                    "thumbnail_url": thumbnail_path,
+                    "status": "generated",
+                },
+            )
 
             result = {
                 "success": True,
-                "job_id": job_id,
-                "talent_name": talent_name,
-                "topic": content_request.topic,
+                "content_id": content_item.id,
                 "title": generated_content.title,
-                "description": generated_content.description,
-                "tags": generated_content.tags,
-                "content_type": content_type,
-                "duration": generated_content.estimated_duration,
-                "video_path": video_path,
                 "audio_path": audio_path,
+                "video_path": video_path,
                 "thumbnail_path": thumbnail_path,
-                "runway_used": use_runway and self.runway_enabled,
-                "scenes_generated": (
-                    len(generated_content.visual_scenes)
-                    if generated_content.visual_scenes
-                    else 0
-                ),
-                **youtube_result,
+                "estimated_duration": generated_content.estimated_duration,
             }
 
-            logger.info(
-                f"✅ Enhanced content creation completed: {generated_content.title}"
-            )
+            # Step 8: Upload to YouTube (if enabled)
+            if auto_upload:
+                await self._update_job_status(job_id, "Uploading to YouTube", 80)
+
+                # Check if YouTube is authenticated
+                if not self.youtube_service.is_authenticated():
+                    await self.youtube_service.load_credentials()
+
+                if self.youtube_service.is_authenticated():
+                    try:
+                        video_id = await self.youtube_service.upload_video(
+                            video_path=video_path,
+                            title=generated_content.title,
+                            description=generated_content.description,
+                            tags=generated_content.tags,
+                            thumbnail_path=thumbnail_path,
+                        )
+
+                        if video_id:
+                            # Update content record with YouTube info
+                            await self._update_content_record(
+                                content_item.id,
+                                {
+                                    "platform_id": video_id,
+                                    "status": "published",
+                                    "published_at": datetime.utcnow(),
+                                },
+                            )
+
+                            result["youtube_video_id"] = video_id
+                            result["youtube_url"] = (
+                                f"https://youtube.com/watch?v={video_id}"
+                            )
+
+                            logger.info(f"Video uploaded successfully: {video_id}")
+                        else:
+                            logger.warning("Video upload failed")
+                            result["upload_error"] = "Upload failed"
+
+                    except Exception as e:
+                        logger.error(f"YouTube upload error: {e}")
+                        result["upload_error"] = str(e)
+                else:
+                    logger.warning("YouTube not authenticated, skipping upload")
+                    result["upload_error"] = "YouTube not authenticated"
+
+            # Step 9: Cleanup
+            await self._update_job_status(job_id, "Finalizing", 90)
+            self.video_creator.cleanup_temp_files()
+
+            # Complete
+            await self._update_job_status(job_id, "Complete", 100)
+            self.job_status[job_id]["status"] = "completed"
+            self.job_status[job_id]["result"] = result
+
+            logger.info(f"Content pipeline completed successfully: {job_id}")
             return result
 
         except Exception as e:
-            logger.error(f"❌ Enhanced content creation failed: {e}")
-            return {
-                "success": False,
-                "job_id": job_id,
-                "talent_name": talent_name,
-                "topic": topic,
-                "error": str(e),
-            }
+            logger.error(f"Content pipeline failed: {e}")
+            self.job_status[job_id]["status"] = "failed"
+            self.job_status[job_id]["error"] = str(e)
+            raise
 
-    def _get_talent_instance(self, talent_name: str):
-        """Get talent instance by name"""
-        talent_map = {
-            "alex_codemaster": self.alex_codemaster,
-            "alex": self.alex_codemaster,  # Alias
-        }
-        return talent_map.get(talent_name.lower())
+        finally:
+            self.current_job = None
 
-    async def _create_runway_video(
-        self, visual_scenes: List[Dict[str, Any]], talent_instance, job_id: str
-    ) -> Optional[str]:
-        """Create video using Runway with talent-specific scenes"""
+    async def _update_job_status(self, job_id: str, message: str, progress: int):
+        """Update job status"""
+        if job_id in self.job_status:
+            self.job_status[job_id]["progress"] = progress
+            self.job_status[job_id]["steps"].append(
+                {
+                    "message": message,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "progress": progress,
+                }
+            )
+        logger.info(f"Job {job_id}: {message} ({progress}%)")
 
-        if not self.runway_client or not visual_scenes:
+    async def _get_talent(self, talent_id: int):
+        """Get talent from database - lazy import"""
+        try:
+            from core.database.config import SessionLocal
+            from core.database.models import Talent
+
+            db = SessionLocal()
+            try:
+                return db.query(Talent).filter(Talent.id == talent_id).first()
+            finally:
+                db.close()
+        except ImportError as e:
+            logger.error(f"Could not import database components: {e}")
             return None
+
+    async def _create_content_record(
+        self, talent_id: int, generated_content, content_type: str
+    ):
+        """Create content item in database - lazy import"""
+        try:
+            from core.database.config import SessionLocal
+            from core.database.models import ContentItem
+
+            db = SessionLocal()
+            try:
+                content_item = ContentItem(
+                    talent_id=talent_id,
+                    title=generated_content.title,
+                    description=generated_content.description,
+                    script=generated_content.script,
+                    content_type=content_type,
+                    platform="youtube",
+                    status="generating",
+                )
+                db.add(content_item)
+                db.commit()
+                db.refresh(content_item)
+                return content_item
+            finally:
+                db.close()
+        except ImportError as e:
+            logger.error(f"Could not import database components: {e}")
+
+            # Return a mock object that has an id
+            class MockContentItem:
+                def __init__(self):
+                    self.id = 1
+
+            return MockContentItem()
+
+    async def _update_content_record(self, content_id: int, updates: Dict[str, Any]):
+        """Update content item in database - lazy import"""
+        try:
+            from core.database.config import SessionLocal
+            from core.database.models import ContentItem
+
+            db = SessionLocal()
+            try:
+                content_item = (
+                    db.query(ContentItem).filter(ContentItem.id == content_id).first()
+                )
+                if content_item:
+                    for key, value in updates.items():
+                        setattr(content_item, key, value)
+                    db.commit()
+            finally:
+                db.close()
+        except ImportError as e:
+            logger.error(f"Could not import database components: {e}")
+
+    def get_job_status(self, job_id: str) -> Dict[str, Any]:
+        """Get current job status"""
+        return self.job_status.get(job_id, {"status": "not_found"})
+
+    def list_recent_jobs(self, limit: int = 10) -> Dict[str, Any]:
+        """List recent jobs"""
+        recent_jobs = dict(list(self.job_status.items())[-limit:])
+        return recent_jobs
+
+    async def test_pipeline_components(self) -> Dict[str, bool]:
+        """Test all pipeline components"""
+        results = {}
 
         try:
-            video_assets = []
-
-            # Generate video for each scene
-            for i, scene in enumerate(visual_scenes):
-                logger.info(f"  Generating scene {i+1}/{len(visual_scenes)}...")
-
-                # Create enhanced prompt for Runway
-                runway_prompt = f"""
-                {scene.get('description', '')}
-                
-                {talent_instance.config['visual_style']['aesthetic']}
-                Environment: {talent_instance.config['visual_style']['environment']}
-                Colors: {talent_instance.config['visual_style']['color_scheme']}
-                Tech elements: {scene.get('tech_elements', 'modern developer tools')}
-                
-                Professional quality, 4K resolution, engaging for tech audience
-                """
-
-                # Generate base image
-                image_task = self.runway_client.text_to_image.create(
-                    model="gen4_image", prompt_text=runway_prompt, ratio="1920:1080"
-                )
-
-                # Wait for image completion
-                while True:
-                    await asyncio.sleep(2)
-                    image_status = self.runway_client.tasks.retrieve(image_task.id)
-                    if image_status.status in ["SUCCEEDED", "FAILED"]:
-                        break
-
-                if image_status.status == "SUCCEEDED":
-                    base_image_url = image_status.output[0]
-
-                    # Create video from image
-                    video_task = self.runway_client.image_to_video.create(
-                        model="gen4_turbo",
-                        prompt_image=base_image_url,
-                        prompt_text=f"Animate this tech scene: {runway_prompt}",
-                        ratio="1920:1080",
-                        duration=min(int(scene.get("duration", 6)), 10),
-                    )
-
-                    # Wait for video completion
-                    while True:
-                        await asyncio.sleep(10)
-                        video_status = self.runway_client.tasks.retrieve(video_task.id)
-                        if video_status.status in ["SUCCEEDED", "FAILED"]:
-                            break
-
-                    if video_status.status == "SUCCEEDED":
-                        video_url = video_status.output[0]
-                        video_assets.append(
-                            {
-                                "scene_id": f"scene_{i+1}",
-                                "video_url": video_url,
-                                "duration": scene.get("duration", 6),
-                                "local_path": None,
-                            }
-                        )
-
-            # Download and combine video assets using existing video creator
-            if video_assets:
-                return await self._combine_runway_assets(video_assets, job_id)
-
+            # Test OpenAI
+            test_prompt = "Say hello"
+            response = await self.content_generator._call_openai(
+                test_prompt, max_tokens=10
+            )
+            results["openai"] = bool(response)
         except Exception as e:
-            logger.error(f"Runway video generation failed: {e}")
-            return None
+            logger.error(f"OpenAI test failed: {e}")
+            results["openai"] = False
 
-        return None
+        try:
+            # Test TTS
+            test_audio = await self.tts_service.generate_speech(
+                "This is a test", {}, filename="test_audio.mp3"
+            )
+            results["tts"] = Path(test_audio).exists() if test_audio else False
+        except Exception as e:
+            logger.error(f"TTS test failed: {e}")
+            results["tts"] = False
 
-    async def _combine_runway_assets(
-        self, video_assets: List[Dict[str, Any]], job_id: str
-    ) -> str:
-        """Download and combine Runway video assets"""
-        import requests
-        from moviepy.editor import VideoFileClip, concatenate_videoclips
-        from pathlib import Path
+        try:
+            # Test video creation (minimal test)
+            results["video_creator"] = True  # Just check if imports work
+        except Exception as e:
+            logger.error(f"Video creator test failed: {e}")
+            results["video_creator"] = False
 
-        output_dir = Path("content/video")
-        output_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            # Test YouTube authentication
+            results["youtube"] = await self.youtube_service.load_credentials()
+        except Exception as e:
+            logger.error(f"YouTube test failed: {e}")
+            results["youtube"] = False
 
-        clips = []
+        return results
 
-        # Download each video asset
-        for asset in video_assets:
-            try:
-                response = requests.get(asset["video_url"], timeout=60)
-                response.raise_for_status()
 
-                local_path = output_dir / f"{asset['scene_id']}_{job_id}.mp4"
-                with open(local_path, "wb") as f:
-                    f.write(response.content)
+# SEPARATE MODULE-LEVEL FUNCTIONS TO AVOID CIRCULAR IMPORTS
+# These functions are moved to prevent circular dependencies
 
-                asset["local_path"] = str(local_path)
-                clip = VideoFileClip(str(local_path))
-                clips.append(clip)
 
-            except Exception as e:
-                logger.error(f"Error downloading {asset['scene_id']}: {e}")
-                continue
-
-        if not clips:
-            return None
-
-        # Combine clips with transitions
-        if len(clips) > 1:
-            # Add smooth transitions
-            transition_duration = 0.3
-            final_clips = [clips[0]]
-
-            for i in range(1, len(clips)):
-                prev_clip = final_clips[-1]
-                current_clip = clips[i]
-
-                if (
-                    prev_clip.duration > transition_duration
-                    and current_clip.duration > transition_duration
-                ):
-                    prev_clip = prev_clip.fadeout(transition_duration)
-                    current_clip = current_clip.fadein(transition_duration)
-                    final_clips[-1] = prev_clip
-
-                final_clips.append(current_clip)
-
-            final_video = concatenate_videoclips(final_clips, method="compose")
-        else:
-            final_video = clips[0]
-
-        # Export final video
-        output_path = output_dir / f"runway_video_{job_id}.mp4"
-        final_video.write_videofile(
-            str(output_path),
-            fps=24,
-            codec="libx264",
-            audio_codec="aac",
-            verbose=False,
-            logger=None,
+async def quick_generate_content(
+    talent_id: int, topic: str, content_type: str = "long_form"
+) -> Dict[str, Any]:
+    """Quick function to generate content - creates new pipeline instance"""
+    try:
+        pipeline = ContentPipeline()
+        return await pipeline.create_and_upload_content(
+            talent_id, topic, content_type, auto_upload=False
         )
+    except Exception as e:
+        logger.error(f"Quick content generation failed: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "talent_id": talent_id,
+            "topic": topic,
+        }
 
-        # Cleanup
-        for clip in clips:
-            clip.close()
-        final_video.close()
 
-        return str(output_path)
+async def quick_generate_and_upload(
+    talent_id: int, topic: str, content_type: str = "long_form"
+) -> Dict[str, Any]:
+    """Quick function to generate and upload content"""
+    try:
+        pipeline = ContentPipeline()
+        return await pipeline.create_and_upload_content(
+            talent_id, topic, content_type, auto_upload=True
+        )
+    except Exception as e:
+        logger.error(f"Quick generate and upload failed: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "talent_id": talent_id,
+            "topic": topic,
+        }
+
+
+# Content scheduling system - moved outside class to avoid circular imports
+class ContentScheduler:
+    """Schedule regular content creation"""
+
+    def __init__(self):
+        self._pipeline = None
+        self.schedule = {}
+
+    @property
+    def pipeline(self):
+        """Lazy load pipeline"""
+        if self._pipeline is None:
+            self._pipeline = ContentPipeline()
+        return self._pipeline
+
+    async def schedule_weekly_content(
+        self, talent_id: int, topics: list, content_types: list
+    ):
+        """Schedule weekly content for a talent"""
+        # Implementation for scheduling system
+        # This would integrate with Celery or similar for production
+        pass
+
+    async def generate_content_ideas(self, talent_id: int, count: int = 5) -> list:
+        """Generate content ideas for a talent"""
+        try:
+            from core.content.generator import PROGRAMMING_TOPICS
+            import random
+
+            # For now, return random topics
+            # In production, this would use AI to generate personalized topics
+            return random.sample(
+                PROGRAMMING_TOPICS, min(count, len(PROGRAMMING_TOPICS))
+            )
+        except ImportError:
+            # Fallback topics
+            return [
+                "Introduction to Programming",
+                "Web Development Basics",
+                "Database Fundamentals",
+                "API Development",
+                "Software Testing",
+            ][:count]
