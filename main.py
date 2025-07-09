@@ -1,4 +1,4 @@
-# main.py - Fixed version with proper error handling
+# main.py - Fixed version with proper imports and error handling
 
 import os
 import logging
@@ -7,14 +7,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 from typing import Optional
-from datetime import datetime
+from datetime import datetime  # Add this import
 
 # Core imports that should work
-from core.database.config import get_db, init_db
+from core.database.config import get_db, init_db, SessionLocal  # Single import line
 from core.database.models import Talent, ContentItem
-
-# Add this line with your other imports
-from core.database.config import get_db, init_db, SessionLocal
 
 # Load environment variables
 load_dotenv()
@@ -73,6 +70,18 @@ except Exception as e:
     logger.warning(f"Celery tasks not available: {e}")
     CELERY_AVAILABLE = False
 
+# Try to import pipeline functions
+try:
+    from core.pipeline.content_pipeline import (
+        quick_generate_content,
+        quick_generate_and_upload,
+    )
+
+    QUICK_GENERATION_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Quick generation functions not available: {e}")
+    QUICK_GENERATION_AVAILABLE = False
+
 
 # Initialize database on startup
 @app.on_event("startup")
@@ -94,6 +103,7 @@ async def root():
             "pipeline": PIPELINE_AVAILABLE,
             "youtube": YOUTUBE_AVAILABLE,
             "celery": CELERY_AVAILABLE,
+            "quick_generation": QUICK_GENERATION_AVAILABLE,
         },
     }
 
@@ -109,6 +119,7 @@ async def health_check():
             "content_pipeline": PIPELINE_AVAILABLE,
             "youtube_service": YOUTUBE_AVAILABLE,
             "celery_tasks": CELERY_AVAILABLE,
+            "quick_generation": QUICK_GENERATION_AVAILABLE,
         },
         "apis": {
             "openai": "configured" if os.getenv("OPENAI_API_KEY") else "not configured",
@@ -284,6 +295,46 @@ async def get_task_status(task_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Direct content generation (non-async)
+@app.post("/content/generate-now")
+async def generate_content_now(
+    talent_id: int,
+    topic: Optional[str] = None,
+    content_type: str = "long_form",
+    db: Session = Depends(get_db),
+):
+    """Generate content immediately (non-async)"""
+    if not QUICK_GENERATION_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Quick generation functions not available. Check core.pipeline imports.",
+        )
+
+    try:
+        # Validate talent exists
+        talent = db.query(Talent).filter(Talent.id == talent_id).first()
+        if not talent:
+            raise HTTPException(status_code=404, detail="Talent not found")
+
+        # Generate content
+        result = await quick_generate_content(talent_id, topic, content_type)
+
+        return {
+            "message": "Content generated successfully",
+            "talent_id": talent_id,
+            "talent_name": talent.name,
+            "topic": topic or "random topic",
+            "content_type": content_type,
+            "result": result,
+            "status": "completed",
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Content generation failed: {str(e)}"
+        )
+
+
 # Alex CodeMaster creation endpoint
 @app.post("/talents/alex-codemaster")
 async def create_alex_codemaster(db: Session = Depends(get_db)):
@@ -337,81 +388,13 @@ async def create_alex_codemaster(db: Session = Depends(get_db)):
         }
 
 
-# Install dependencies endpoint
-@app.get("/install-guide")
-async def get_install_guide():
-    """Get installation guide for missing dependencies"""
-    missing_deps = []
-
-    if not PIPELINE_AVAILABLE:
-        missing_deps.append("content pipeline dependencies")
-    if not YOUTUBE_AVAILABLE:
-        missing_deps.append(
-            "google-auth-oauthlib google-auth-httplib2 google-api-python-client"
-        )
-    if not CELERY_AVAILABLE:
-        missing_deps.append("celery redis")
-
-    return {
-        "missing_dependencies": missing_deps,
-        "install_commands": [
-            "pip install google-auth-oauthlib google-auth-httplib2 google-api-python-client",
-            "pip install celery redis flower",
-            "pip install openai elevenlabs",
-        ],
-        "setup_steps": [
-            "1. Install missing dependencies with pip commands above",
-            "2. Start Redis: docker run -d -p 6379:6379 redis:alpine",
-            "3. Start Celery worker: celery -A celery_app worker --loglevel=info",
-            "4. Restart the API server",
-        ],
-    }
-
-
-# Add this endpoint to your main.py
-@app.post("/content/generate-now")
-async def generate_content_now(
-    talent_id: int,
-    topic: Optional[str] = None,
-    content_type: str = "long_form",
-    db: Session = Depends(get_db),
-):
-    """Generate content immediately (non-async)"""
-    try:
-        # Validate talent exists
-        talent = db.query(Talent).filter(Talent.id == talent_id).first()
-        if not talent:
-            raise HTTPException(status_code=404, detail="Talent not found")
-
-        # Import and use the pipeline
-        from core.pipeline.content_pipeline import quick_generate_content
-
-        # Generate content
-        result = await quick_generate_content(talent_id, topic, content_type)
-
-        return {
-            "message": "Content generated successfully",
-            "talent_id": talent_id,
-            "talent_name": talent.name,
-            "topic": topic or "random topic",
-            "content_type": content_type,
-            "result": result,
-            "status": "completed",
-        }
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Content generation failed: {str(e)}"
-        )
-
-
-# Add these endpoints to your main.py (before the final if __name__ == "__main__":)
-
-
 # YouTube Authentication and Upload Endpoints
 @app.post("/youtube/authenticate")
 async def youtube_authenticate():
     """Authenticate with YouTube using credentials file"""
+    if not YOUTUBE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="YouTube service not available")
+
     try:
         result = await youtube_service.authenticate_with_file()
         return {"message": result, "status": "success"}
@@ -423,6 +406,13 @@ async def youtube_authenticate():
 @app.get("/youtube/status")
 async def youtube_status():
     """Check YouTube authentication status"""
+    if not YOUTUBE_AVAILABLE:
+        return {
+            "authenticated": False,
+            "service_available": False,
+            "error": "YouTube service not available",
+        }
+
     try:
         is_auth = youtube_service.is_authenticated()
         if not is_auth:
@@ -442,6 +432,9 @@ async def youtube_status():
 @app.post("/content/{content_id}/upload")
 async def upload_content_to_youtube(content_id: int, db: Session = Depends(get_db)):
     """Upload specific content to YouTube"""
+    if not YOUTUBE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="YouTube service not available")
+
     try:
         # Get content item
         content = db.query(ContentItem).filter(ContentItem.id == content_id).first()
@@ -505,91 +498,7 @@ async def upload_content_to_youtube(content_id: int, db: Session = Depends(get_d
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
-@app.post("/content/upload-batch")
-async def upload_batch_to_youtube(
-    talent_id: Optional[int] = None, limit: int = 5, db: Session = Depends(get_db)
-):
-    """Upload multiple completed content items to YouTube"""
-    try:
-        # Get content ready for upload
-        query = db.query(ContentItem).filter(
-            ContentItem.video_url.isnot(None),  # Has video
-            ContentItem.platform_url.is_(None),  # Not uploaded yet
-            ContentItem.status == "generated",  # Completed
-        )
-
-        if talent_id:
-            query = query.filter(ContentItem.talent_id == talent_id)
-
-        content_items = query.limit(limit).all()
-
-        if not content_items:
-            return {"message": "No content ready for upload", "uploaded": 0, "total": 0}
-
-        uploaded_count = 0
-        results = []
-
-        for content in content_items:
-            try:
-                # Upload this content
-                video_id = await youtube_service.upload_video(
-                    video_path=content.video_url,
-                    title=content.title,
-                    description=content.description
-                    or f"Educational content by Alex CodeMaster\n\n{content.title}",
-                    tags=["programming", "tutorial", "education"],
-                    thumbnail_path=content.thumbnail_url,
-                )
-
-                if video_id:
-                    content.platform_url = video_id
-                    content.status = "published"
-                    content.published_at = datetime.now()
-                    uploaded_count += 1
-
-                    results.append(
-                        {
-                            "content_id": content.id,
-                            "title": content.title,
-                            "youtube_url": f"https://youtube.com/watch?v={video_id}",
-                            "status": "success",
-                        }
-                    )
-                else:
-                    results.append(
-                        {
-                            "content_id": content.id,
-                            "title": content.title,
-                            "status": "failed",
-                            "error": "Upload returned no video ID",
-                        }
-                    )
-
-            except Exception as e:
-                logger.error(f"Failed to upload content {content.id}: {e}")
-                results.append(
-                    {
-                        "content_id": content.id,
-                        "title": content.title,
-                        "status": "failed",
-                        "error": str(e),
-                    }
-                )
-
-        db.commit()
-
-        return {
-            "message": f"Batch upload completed: {uploaded_count}/{len(content_items)} successful",
-            "uploaded": uploaded_count,
-            "total": len(content_items),
-            "results": results,
-        }
-
-    except Exception as e:
-        logger.error(f"Batch upload failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Batch upload failed: {str(e)}")
-
-
+# Generate and upload endpoint
 @app.post("/content/generate-and-upload")
 async def generate_and_upload_to_youtube(
     talent_id: int,
@@ -598,63 +507,70 @@ async def generate_and_upload_to_youtube(
     db: Session = Depends(get_db),
 ):
     """Generate content and automatically upload to YouTube"""
+    if not QUICK_GENERATION_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Quick generation functions not available",
+        )
+
+    if not YOUTUBE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="YouTube service not available")
+
     try:
         # Validate talent exists
         talent = db.query(Talent).filter(Talent.id == talent_id).first()
         if not talent:
             raise HTTPException(status_code=404, detail="Talent not found")
 
-        # Generate content
+        # Generate and upload content
         result = await quick_generate_and_upload(talent_id, topic, content_type)
 
-        # Get the created content item
-        if result.get("content_id"):
-            content = (
-                db.query(ContentItem)
-                .filter(ContentItem.id == result["content_id"])
-                .first()
-            )
-
-            if content and content.video_url:
-                # Upload to YouTube
-                try:
-                    video_id = await youtube_service.upload_video(
-                        video_path=content.video_url,
-                        title=content.title,
-                        description=content.description
-                        or f"Educational content by {talent.name}\n\n{content.title}",
-                        tags=["programming", "tutorial", "education"],
-                        thumbnail_path=content.thumbnail_url,
-                    )
-
-                    if video_id:
-                        content.platform_url = video_id
-                        content.status = "published"
-                        content.published_at = datetime.now()
-                        db.commit()
-
-                        result["youtube_upload"] = {
-                            "video_id": video_id,
-                            "url": f"https://youtube.com/watch?v={video_id}",
-                            "status": "success",
-                        }
-
-                except Exception as upload_error:
-                    logger.error(f"YouTube upload failed: {upload_error}")
-                    result["youtube_upload"] = {
-                        "status": "failed",
-                        "error": str(upload_error),
-                    }
-
         return {
-            "message": "Content generated and upload attempted",
-            "generation_result": result,
+            "message": "Content generated and uploaded successfully",
+            "talent_id": talent_id,
+            "talent_name": talent.name,
             "topic": topic or "random topic",
+            "content_type": content_type,
+            "result": result,
+            "status": "completed",
         }
 
     except Exception as e:
         logger.error(f"Generate and upload failed: {e}")
         raise HTTPException(status_code=500, detail=f"Operation failed: {str(e)}")
+
+
+# Install dependencies endpoint
+@app.get("/install-guide")
+async def get_install_guide():
+    """Get installation guide for missing dependencies"""
+    missing_deps = []
+
+    if not PIPELINE_AVAILABLE:
+        missing_deps.append("content pipeline dependencies")
+    if not YOUTUBE_AVAILABLE:
+        missing_deps.append(
+            "google-auth-oauthlib google-auth-httplib2 google-api-python-client"
+        )
+    if not CELERY_AVAILABLE:
+        missing_deps.append("celery redis")
+    if not QUICK_GENERATION_AVAILABLE:
+        missing_deps.append("quick generation pipeline functions")
+
+    return {
+        "missing_dependencies": missing_deps,
+        "install_commands": [
+            "pip install google-auth-oauthlib google-auth-httplib2 google-api-python-client",
+            "pip install celery redis flower",
+            "pip install openai elevenlabs",
+        ],
+        "setup_steps": [
+            "1. Install missing dependencies with pip commands above",
+            "2. Start Redis: docker run -d -p 6379:6379 redis:alpine",
+            "3. Start Celery worker: celery -A celery_app worker --loglevel=info",
+            "4. Restart the API server",
+        ],
+    }
 
 
 if __name__ == "__main__":
