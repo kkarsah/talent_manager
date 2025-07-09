@@ -1,0 +1,345 @@
+#!/usr/bin/env python3
+"""
+Cleanup script to fix alex_codemaster import issues
+"""
+
+import os
+import shutil
+from pathlib import Path
+
+
+def backup_existing_files():
+    """Backup existing alex_codemaster files"""
+    print("📁 Creating backups of existing files...")
+
+    alex_files = list(Path(".").rglob("*alex_codemaster*.py"))
+
+    for file_path in alex_files:
+        backup_path = file_path.with_suffix(".py.backup")
+        if file_path.exists():
+            shutil.copy2(file_path, backup_path)
+            print(f"✅ Backed up {file_path} -> {backup_path}")
+
+
+def remove_duplicate_files():
+    """Remove duplicate alex_codemaster files"""
+    print("\n🗑️  Removing duplicate files...")
+
+    # Look for files like alex_codemaster.py, alex_codemaster_old.py, etc.
+    duplicate_patterns = [
+        "*alex_codemaster_*.py",
+        "*alex_codemaster*.py.old",
+        "*alex_codemaster*copy*.py",
+    ]
+
+    for pattern in duplicate_patterns:
+        duplicate_files = list(Path(".").rglob(pattern))
+        for file_path in duplicate_files:
+            # Don't delete the main alex_codemaster.py file
+            if file_path.name == "alex_codemaster.py":
+                continue
+
+            print(f"🗑️  Removing duplicate: {file_path}")
+            file_path.unlink()
+
+
+def create_fixed_alex_file():
+    """Create the fixed alex_codemaster.py file"""
+    alex_path = Path("talents/tech_educator/alex_codemaster.py")
+
+    # The complete fixed content
+    fixed_content = '''# talents/tech_educator/alex_codemaster.py
+"""
+Alex CodeMaster - Complete implementation with both classes
+"""
+
+import json
+import logging
+from pathlib import Path
+from typing import Dict, Any, List, Optional
+
+logger = logging.getLogger(__name__)
+
+
+class AlexCodeMaster:
+    """Alex CodeMaster - Main implementation"""
+
+    def __init__(self):
+        self.name = "Alex CodeMaster"
+        self.specialization = "tech_education"
+        self.config = self._load_config()
+
+    def _load_config(self) -> Dict[str, Any]:
+        """Load Alex's configuration"""
+        config_path = Path(__file__).parent / "personality.json"
+
+        default_config = {
+            "name": "Alex CodeMaster",
+            "specialization": "tech_education",
+            "voice_settings": {
+                "provider": "elevenlabs",
+                "voice_id": "alex_tech_voice",
+                "style": "enthusiastic",
+            },
+            "content_strategy": {
+                "target_audience": "developers and tech enthusiasts",
+                "primary_topics": [
+                    "AI coding tools",
+                    "Python programming",
+                    "Web development",
+                    "Developer productivity",
+                ],
+            },
+        }
+
+        if config_path.exists():
+            try:
+                with open(config_path, "r") as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.warning(f"Could not load config: {e}")
+                return default_config
+        else:
+            # Create default config file
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(config_path, "w") as f:
+                json.dump(default_config, f, indent=2)
+            return default_config
+
+    async def generate_content_request(self, topic=None, content_type="long_form"):
+        """Generate content request for Alex"""
+        return {
+            "topic": topic or "Default Tech Topic",
+            "content_type": content_type,
+            "target_audience": self.config["content_strategy"]["target_audience"],
+        }
+
+    def get_voice_settings(self):
+        """Get Alex's voice settings"""
+        return self.config["voice_settings"]
+
+
+class AlexCodeMasterProfile:
+    """
+    Alex CodeMaster Profile - Compatibility class for existing imports
+    This class provides the expected interface for main.py and cli.py
+    """
+    
+    def __init__(self):
+        self.profile = self._load_profile()
+    
+    def _load_profile(self) -> Dict[str, Any]:
+        """Load Alex's complete profile from personality.json"""
+        config_path = Path(__file__).parent / "personality.json"
+        
+        # Default profile structure that matches expected format
+        default_profile = {
+            "basic_info": {
+                "name": "Alex CodeMaster",
+                "specialization": "tech_education",
+                "description": "Tech educator focused on coding tutorials and developer productivity"
+            },
+            "personality": {
+                "style": "enthusiastic and educational",
+                "tone": "professional yet approachable",
+                "expertise_areas": [
+                    "Python programming",
+                    "Web development", 
+                    "AI coding tools",
+                    "Developer productivity"
+                ],
+                "signature_phrases": [
+                    "What's up developers!",
+                    "Alex's Pro Tip:",
+                    "Let me show you something cool",
+                    "Here's the thing developers:",
+                    "Trust me on this one:"
+                ],
+                "hooks": [
+                    "What's up developers!",
+                    "Ready to level up your coding game?",
+                    "Every developer needs to know this...",
+                    "Let me show you something that will blow your mind..."
+                ],
+                "ctas": [
+                    "Drop your questions in the comments below!",
+                    "Subscribe for more coding tutorials!",
+                    "What tool should I review next?"
+                ]
+            },
+            "voice_settings": {
+                "provider": "elevenlabs",
+                "voice_id": "alex_tech_voice",
+                "style": "enthusiastic"
+            },
+            "content_strategy": {
+                "target_audience": "developers and tech enthusiasts",
+                "primary_topics": [
+                    "AI coding tools",
+                    "Python programming", 
+                    "Web development",
+                    "Developer productivity"
+                ]
+            }
+        }
+        
+        # Try to load from personality.json
+        if config_path.exists():
+            try:
+                with open(config_path, "r") as f:
+                    personality_data = json.load(f)
+                    
+                # Convert personality.json format to expected profile format
+                profile = {
+                    "basic_info": {
+                        "name": personality_data.get("name", "Alex CodeMaster"),
+                        "specialization": personality_data.get("specialization", "tech_education"),
+                        "description": "Tech educator focused on coding tutorials and developer productivity"
+                    },
+                    "personality": {
+                        "style": "enthusiastic and educational",
+                        "tone": "professional yet approachable",
+                        "expertise_areas": personality_data.get("content_strategy", {}).get("primary_topics", default_profile["personality"]["expertise_areas"]),
+                        "signature_phrases": personality_data.get("content_strategy", {}).get("signature_phrases", default_profile["personality"]["signature_phrases"]),
+                        "hooks": personality_data.get("content_strategy", {}).get("hooks", default_profile["personality"]["hooks"]),
+                        "ctas": personality_data.get("content_strategy", {}).get("ctas", default_profile["personality"]["ctas"])
+                    },
+                    "voice_settings": personality_data.get("voice_settings", default_profile["voice_settings"]),
+                    "content_strategy": personality_data.get("content_strategy", default_profile["content_strategy"])
+                }
+                
+                logger.info("Successfully loaded Alex profile from personality.json")
+                return profile
+                
+            except Exception as e:
+                logger.warning(f"Could not load personality.json: {e}, using defaults")
+                return default_profile
+        else:
+            logger.info("personality.json not found, using default profile")
+            return default_profile
+    
+    def get_basic_info(self) -> Dict[str, Any]:
+        """Get basic info for compatibility"""
+        return self.profile["basic_info"]
+    
+    def get_personality(self) -> Dict[str, Any]:
+        """Get personality for compatibility"""
+        return self.profile["personality"]
+    
+    def get_voice_settings(self) -> Dict[str, Any]:
+        """Get voice settings for compatibility"""
+        return self.profile["voice_settings"]
+
+
+# For backwards compatibility, create a default instance
+def create_alex_profile():
+    """Factory function to create Alex profile"""
+    return AlexCodeMasterProfile()
+
+
+# Export commonly used classes
+__all__ = ["AlexCodeMaster", "AlexCodeMasterProfile", "create_alex_profile"]
+'''
+
+    # Ensure directory exists
+    alex_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write the fixed file
+    with open(alex_path, "w") as f:
+        f.write(fixed_content)
+
+    print(f"✅ Created fixed alex_codemaster.py at {alex_path}")
+
+
+def clear_python_cache():
+    """Clear Python cache to force reload"""
+    print("\n🧹 Clearing Python cache...")
+
+    cache_dirs = list(Path(".").rglob("__pycache__"))
+    for cache_dir in cache_dirs:
+        if cache_dir.is_dir():
+            shutil.rmtree(cache_dir)
+            print(f"🗑️  Removed {cache_dir}")
+
+    # Also remove .pyc files
+    pyc_files = list(Path(".").rglob("*.pyc"))
+    for pyc_file in pyc_files:
+        pyc_file.unlink()
+        print(f"🗑️  Removed {pyc_file}")
+
+
+def test_imports():
+    """Test if imports work after cleanup"""
+    print("\n🧪 Testing imports...")
+
+    try:
+        # Add current directory to path for testing
+        import sys
+
+        sys.path.insert(0, str(Path(".").resolve()))
+
+        # Test the imports
+        from talents.tech_educator.alex_codemaster import (
+            AlexCodeMasterProfile,
+            AlexCodeMaster,
+        )
+
+        # Test instantiation
+        profile = AlexCodeMasterProfile()
+        alex = AlexCodeMaster()
+
+        print("✅ AlexCodeMasterProfile import: SUCCESS")
+        print("✅ AlexCodeMaster import: SUCCESS")
+        print("✅ Instantiation: SUCCESS")
+
+        # Test expected attributes
+        if hasattr(profile, "profile"):
+            print("✅ Profile.profile attribute: SUCCESS")
+        if hasattr(profile.profile, "get") and "basic_info" in profile.profile:
+            print("✅ Profile.profile['basic_info']: SUCCESS")
+
+        return True
+
+    except Exception as e:
+        print(f"❌ Import test failed: {e}")
+        return False
+
+
+def main():
+    """Main cleanup function"""
+    print("🔧 Alex CodeMaster Import Cleanup Tool")
+    print("=" * 50)
+
+    # Step 1: Backup existing files
+    backup_existing_files()
+
+    # Step 2: Remove duplicates
+    remove_duplicate_files()
+
+    # Step 3: Clear Python cache
+    clear_python_cache()
+
+    # Step 4: Create fixed file
+    create_fixed_alex_file()
+
+    # Step 5: Test imports
+    success = test_imports()
+
+    print("\n" + "=" * 50)
+    if success:
+        print("🎉 Cleanup completed successfully!")
+        print("✅ You can now run: python cli.py test-pipeline")
+    else:
+        print("⚠️  Cleanup completed but imports still failing")
+        print("💡 Try restarting your Python session")
+
+    print("\n📋 What was done:")
+    print("1. Backed up existing alex_codemaster files")
+    print("2. Removed duplicate files")
+    print("3. Cleared Python cache")
+    print("4. Created fixed alex_codemaster.py with both classes")
+    print("5. Tested imports")
+
+
+if __name__ == "__main__":
+    main()
