@@ -151,4 +151,4 @@ ehthumbs.db
 Thumbs.db
 
 # Docker
-.dockerignore
+.dockerignorecredentials/youtube_credentials.json
