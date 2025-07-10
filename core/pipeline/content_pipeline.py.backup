@@ -58,11 +58,9 @@ class ContentPipeline:
         """Lazy load video creator"""
         if self._video_creator is None:
             try:
-                from core.content.enhanced_video_creator import (
-                    EnhancedVideoCreator as VideoCreator,
-                )
+                from core.content.video_creator import VideoCreator
 
-                self._video_creator = EnhancedEnhancedVideoCreator()
+                self._video_creator = VideoCreator()
             except ImportError as e:
                 logger.error(f"Could not import VideoCreator: {e}")
                 raise
@@ -118,7 +116,15 @@ class ContentPipeline:
             from core.content.generator import ContentRequest
 
             content_request = ContentRequest(
-                talent_name=talent.name, topic=topic, content_type=content_type
+                talent_name=talent.name,
+                topic=topic,
+                content_type=content_type,
+                target_audience="general",
+                platform="youtube",
+                style_guide="engaging and informative",
+                personality_prompt=f"Create content as {talent.name}",
+                duration_target=300.0,
+                additional_context="",
             )
 
             generated_content = await self.content_generator.generate_content(

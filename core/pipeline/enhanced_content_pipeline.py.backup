@@ -67,7 +67,7 @@ class EnhancedContentPipeline:
         """Lazy load Alex CodeMaster to avoid circular imports"""
         if self._alex_codemaster is None:
             try:
-                from talents.tech_educator.alex_codemaster_2 import AlexCodeMaster
+                from talents.tech_educator.alex_codemaster import AlexCodeMaster
 
                 self._alex_codemaster = AlexCodeMaster()
             except ImportError as e:
