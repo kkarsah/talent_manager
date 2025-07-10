@@ -200,7 +200,7 @@ class ScriptCleaner:
 '''
 
 # Write the updated cleaner
-with open(script_cleaner_path, 'w') as f:
+with open(script_cleaner_path, "w") as f:
     f.write(updated_cleaner)
 
 print("✅ Updated script cleaner with targeted fix for Alex CodeMaster format")

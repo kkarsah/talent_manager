@@ -1,4 +1,5 @@
 from datetime import datetime
+
 # cli.py - COMPLETELY FIXED VERSION
 """
 Talent Manager CLI - Fixed to eliminate ALL circular imports and add Alex commands

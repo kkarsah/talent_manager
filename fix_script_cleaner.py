@@ -203,7 +203,7 @@ class ScriptCleaner:
 '''
 
 # Write the improved cleaner
-with open(script_cleaner_path, 'w') as f:
+with open(script_cleaner_path, "w") as f:
     f.write(improved_cleaner)
 
 print("✅ Updated script cleaner with improved extraction")
