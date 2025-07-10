@@ -385,10 +385,3 @@ class SecureYouTubeService:
             "storage_method": "environment_variables",
             "security_level": "high",
         }
-
-
-# Backward compatibility alias
-YouTubeService = SecureYouTubeService
-
-# Legacy import support
-__all__ = ["SecureYouTubeService", "YouTubeService"]

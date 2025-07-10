@@ -1,47 +1,27 @@
-# cli.py
+from datetime import datetime
+
+# cli.py - COMPLETELY FIXED VERSION
+"""
+Talent Manager CLI - Fixed to eliminate ALL circular imports and add Alex commands
+"""
 
 import click
 import os
 import sys
-from dotenv import load_dotenv
-import click
 import asyncio
+from dotenv import load_dotenv
 from pathlib import Path
 from sqlalchemy.orm import Session
+import json
+from datetime import datetime
+
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+# ONLY SAFE IMPORTS - These should never cause circular imports
 from core.database.config import SessionLocal, init_db
 from core.database.models import Talent, ContentItem
-
-import asyncio
-from core.pipeline.content_pipeline import (
-    ContentPipeline,
-    quick_generate_content,
-    quick_generate_and_upload,
-)
-from core.content.generator import PROGRAMMING_TOPICS, get_random_topic
-from platforms.youtube.service import YouTubeService
-
-import asyncio
-from core.pipeline.content_pipeline import (
-    ContentPipeline,
-    quick_generate_content,
-    quick_generate_and_upload,
-)
-from core.content.generator import PROGRAMMING_TOPICS, get_random_topic
-from platforms.youtube.service import YouTubeService
-
-import click
-from core.tasks.content_tasks import (
-    generate_content_task,
-    generate_and_upload_content_task,
-    check_content_schedule,
-    batch_generate_content,
-)
-from core.tasks.analytics_tasks import collect_all_metrics
-from core.tasks.maintenance_tasks import system_health_check
 
 load_dotenv()
 
@@ -62,33 +42,90 @@ def init():
 
 @cli.command()
 def status():
-    """Check system status"""
-    click.echo("🔍 Checking system status...")
+    """Show overall system status"""
+    click.echo("📊 Talent Manager System Status")
+    click.echo("=" * 40)
 
-    # Check database connection
+    # Database status
     try:
         db = SessionLocal()
         talent_count = db.query(Talent).count()
         content_count = db.query(ContentItem).count()
-        db.close()
         click.echo(
-            f"✅ Database: Connected ({talent_count} talents, {content_count} content items)"
+            f"📊 Database: ✅ Connected ({talent_count} talents, {content_count} content items)"
         )
+        db.close()
     except Exception as e:
-        click.echo(f"❌ Database: Error - {e}")
+        click.echo(f"📊 Database: ❌ Error: {e}")
 
-    # Check API keys
-    openai_key = "✅ Configured" if os.getenv("OPENAI_API_KEY") else "❌ Not configured"
-    elevenlabs_key = (
-        "✅ Configured" if os.getenv("ELEVENLABS_API_KEY") else "❌ Not configured"
+    # Test imports safely
+    pipeline_available = False
+    try:
+        from core.pipeline.content_pipeline import ContentPipeline
+
+        pipeline_available = True
+        click.echo("🧬 Content Pipeline: ✅")
+    except Exception as e:
+        click.echo("🧬 Content Pipeline: ❌")
+
+    youtube_available = False
+    try:
+        from platforms.youtube.service import YouTubeService
+
+        youtube_available = True
+        click.echo("🎥 YouTube Service: ✅")
+    except Exception as e:
+        click.echo("🎥 YouTube Service: ❌")
+
+    try:
+        from core.content.generator import ContentGenerator
+
+        click.echo("📚 Content Generator: ✅")
+    except Exception as e:
+        click.echo("📚 Content Generator: ❌")
+
+    try:
+        from core.tasks.content_tasks import generate_content_task
+
+        click.echo("⚙️  Celery Tasks: ✅")
+    except Exception as e:
+        click.echo("⚙️  Celery Tasks: ❌")
+
+    # API Keys
+    click.echo("🔑 API Keys:")
+    click.echo(
+        f"   OpenAI: {'✅ Configured' if os.getenv('OPENAI_API_KEY') else '❌ Missing'}"
     )
-    youtube_key = (
-        "✅ Configured" if os.getenv("YOUTUBE_CLIENT_ID") else "❌ Not configured"
+    click.echo(
+        f"   ElevenLabs: {'✅ Configured' if os.getenv('ELEVENLABS_API_KEY') else '❌ Missing'}"
+    )
+    click.echo(
+        f"   Runway: {'✅ Configured' if os.getenv('RUNWAY_API_KEY') else '❌ Missing'}"
+    )
+    click.echo(
+        f"   YouTube Client: {'✅ Configured' if os.getenv('YOUTUBE_CLIENT_ID') else '❌ Missing'}"
     )
 
-    click.echo(f"🔑 OpenAI API: {openai_key}")
-    click.echo(f"🔑 ElevenLabs API: {elevenlabs_key}")
-    click.echo(f"🔑 YouTube API: {youtube_key}")
+
+@cli.command()
+def list_talents():
+    """List all talents"""
+    click.echo("🎭 Talent Manager - All Talents")
+    click.echo("=" * 40)
+
+    db = SessionLocal()
+    talents = db.query(Talent).all()
+    db.close()
+
+    if not talents:
+        click.echo("No talents found. Create one with: python cli.py create-talent")
+        return
+
+    for talent in talents:
+        status = "Active" if talent.is_active else "Inactive"
+        click.echo(
+            f"  [{talent.id}] {talent.name} - {talent.specialization} ({status})"
+        )
 
 
 @cli.command()
@@ -98,21 +135,19 @@ def create_talent(name, specialization):
     """Create a new talent"""
     click.echo(f"Creating talent: {name}")
 
-    # Basic personality template
-    personality = {
-        "tone": "friendly and professional",
-        "expertise_level": "intermediate to advanced",
-        "teaching_style": "clear and engaging",
-        "target_audience": "general audience interested in " + specialization.lower(),
-    }
-
     db = SessionLocal()
+
+    # Check if talent already exists
+    existing = db.query(Talent).filter(Talent.name == name).first()
+    if existing:
+        click.echo(f"❌ Talent '{name}' already exists with ID: {existing.id}")
+        db.close()
+        return
+
     talent = Talent(
-        name=name,
-        specialization=specialization,
-        personality=personality,
-        is_active=True,
+        name=name, specialization=specialization, personality={}, is_active=True
     )
+
     db.add(talent)
     db.commit()
     db.refresh(talent)
@@ -122,65 +157,302 @@ def create_talent(name, specialization):
 
 
 @cli.command()
-def list_talents():
-    """List all talents"""
-    click.echo("📋 Current talents:")
+def create_alex():
+    """Create Alex CodeMaster talent quickly"""
+    click.echo("🎭 Creating Alex CodeMaster talent...")
 
     db = SessionLocal()
-    talents = db.query(Talent).filter(Talent.is_active == True).all()
-    db.close()
 
-    if not talents:
-        click.echo("No talents found. Create one with: python cli.py create-talent")
+    # Check if Alex already exists
+    existing = db.query(Talent).filter(Talent.name == "Alex CodeMaster").first()
+    if existing:
+        click.echo(f"✅ Alex CodeMaster already exists!")
+        click.echo(f"   ID: {existing.id}")
+        click.echo(f"   Specialization: {existing.specialization}")
+        click.echo(f"   Status: {'Active' if existing.is_active else 'Inactive'}")
+        db.close()
         return
 
-    for talent in talents:
-        status = "🟢 Active" if talent.is_active else "🔴 Inactive"
-        click.echo(f"  {talent.id}: {talent.name} ({talent.specialization}) - {status}")
+    # Create Alex CodeMaster with predefined settings
+    alex_personality = {
+        "voice_style": "enthusiastic and knowledgeable",
+        "visual_style": "modern tech workspace",
+        "expertise_areas": ["Python", "JavaScript", "AI tools", "Web development"],
+        "target_audience": "developers and tech enthusiasts",
+        "content_approach": "hands-on tutorials with practical examples",
+        "brand_keywords": ["coding", "programming", "tech", "AI tools", "productivity"],
+        "signature_phrases": [
+            "What's up developers!",
+            "Alex's Pro Tip:",
+            "Let me show you something cool",
+        ],
+    }
+
+    talent = Talent(
+        name="Alex CodeMaster",
+        specialization="Programming Tutorials",
+        personality=alex_personality,
+        is_active=True,
+    )
+
+    db.add(talent)
+    db.commit()
+    db.refresh(talent)
+    db.close()
+
+    click.echo(f"✅ Alex CodeMaster created successfully!")
+    click.echo(f"   ID: {talent.id}")
+    click.echo(f"   Now you can use: python cli.py alex generate")
 
 
 @cli.command()
 @click.option("--talent-id", type=int, prompt="Talent ID", help="ID of the talent")
-@click.option("--title", prompt="Content title", help="Title of the content")
+@click.option("--topic", prompt="Content topic", help="Topic for the content")
 @click.option(
     "--type",
     "content_type",
-    prompt="Content type",
-    type=click.Choice(["long_form", "short", "reel"]),
+    default="long_form",
+    type=click.Choice(["long_form", "short", "tutorial"]),
     help="Type of content",
 )
-@click.option(
-    "--platform",
-    prompt="Platform",
-    type=click.Choice(["youtube", "tiktok", "instagram"]),
-    help="Target platform",
-)
-def create_content(talent_id, title, content_type, platform):
-    """Create a new content item"""
-    click.echo(f"Creating content: {title}")
-
-    db = SessionLocal()
+def generate(talent_id, topic, content_type):
+    """Generate content for a talent (basic version)"""
+    click.echo(f"🎬 Generating {content_type} content for talent {talent_id}: {topic}")
 
     # Check if talent exists
+    db = SessionLocal()
     talent = db.query(Talent).filter(Talent.id == talent_id).first()
-    if not talent:
-        click.echo(f"❌ Talent with ID {talent_id} not found")
-        db.close()
-        return
-
-    content = ContentItem(
-        talent_id=talent_id,
-        title=title,
-        content_type=content_type,
-        platform=platform,
-        status="draft",
-    )
-    db.add(content)
-    db.commit()
-    db.refresh(content)
     db.close()
 
-    click.echo(f"✅ Content '{title}' created successfully with ID: {content.id}")
+    if not talent:
+        click.echo(f"❌ Talent with ID {talent_id} not found")
+        return
+
+    click.echo(f"✅ Found talent: {talent.name}")
+
+    async def _generate():
+        try:
+            # Try to import and use the content pipeline
+            from core.pipeline.content_pipeline import quick_generate_content
+
+            result = await quick_generate_content(talent_id, topic, content_type)
+
+            if result.get("success"):
+                click.echo(f"✅ Content generated successfully!")
+                click.echo(f"Title: {result.get('title', 'N/A')}")
+                if result.get("video_path"):
+                    click.echo(f"Video: {result['video_path']}")
+            else:
+                click.echo(
+                    f"❌ Generation failed: {result.get('error', 'Unknown error')}"
+                )
+
+        except Exception as e:
+            click.echo(f"❌ Error during generation: {e}")
+            click.echo("💡 This might be due to missing dependencies or configuration")
+
+    asyncio.run(_generate())
+
+
+@cli.command()
+def test_pipeline():
+    """Test the complete content pipeline"""
+    click.echo("🧪 Testing content pipeline components...")
+
+    async def _test():
+        try:
+            from core.pipeline.content_pipeline import ContentPipeline
+
+            pipeline = ContentPipeline()
+            results = await pipeline.test_pipeline_components()
+
+            click.echo("Test Results:")
+            for component, status in results.items():
+                emoji = "✅" if status else "❌"
+                click.echo(f"  {emoji} {component}")
+
+        except Exception as e:
+            click.echo(f"❌ Pipeline test failed: {e}")
+
+    asyncio.run(_test())
+
+
+@cli.command()
+@click.argument("text", default="Hello! This is a test of the TTS system.")
+def test_tts(text):
+    """Test text-to-speech generation with script cleaning"""
+    click.echo("🎤 Testing TTS system with script cleaning...")
+
+    async def _test_tts():
+        try:
+            from core.content.tts import TTSService
+            from core.content.script_cleaner import ScriptCleaner
+
+            # Clean the test text (in case it has formatting)
+            clean_text = ScriptCleaner.extract_spoken_content(text)
+            click.echo(f"📝 Cleaned text: {clean_text[:100]}...")
+
+            tts_service = TTSService()
+            audio_path = await tts_service.generate_speech(
+                clean_text, {}, "test_tts.mp3"
+            )
+
+            if audio_path and Path(audio_path).exists():
+                click.echo(f"✅ TTS test successful! Audio saved to: {audio_path}")
+            else:
+                click.echo("❌ TTS test failed - no audio file created")
+
+        except Exception as e:
+            click.echo(f"❌ TTS test failed: {e}")
+
+    asyncio.run(_test_tts())
+
+
+@cli.command()
+def topics():
+    """List available programming topics"""
+    try:
+        from core.content.generator import PROGRAMMING_TOPICS
+
+        click.echo("📋 Available Programming Topics:")
+        click.echo("=" * 40)
+
+        for i, topic in enumerate(PROGRAMMING_TOPICS[:10], 1):
+            click.echo(f"  {i:2d}. {topic}")
+
+        if len(PROGRAMMING_TOPICS) > 10:
+            click.echo(f"  ... and {len(PROGRAMMING_TOPICS) - 10} more topics")
+
+    except ImportError:
+        click.echo("❌ Programming topics not available")
+
+
+@cli.command()
+def youtube_auth():
+    """Authenticate with YouTube"""
+    click.echo("🎥 Starting YouTube authentication...")
+
+    async def _auth():
+        try:
+            from platforms.youtube.service import YouTubeService
+
+            yt_service = YouTubeService()
+
+            success = await yt_service.authenticate()
+            if success:
+                click.echo("✅ YouTube authentication successful!")
+            else:
+                click.echo("❌ YouTube authentication failed")
+        except Exception as e:
+            click.echo(f"❌ Authentication error: {e}")
+
+    asyncio.run(_auth())
+
+
+@cli.command()
+def youtube_status():
+    """Check YouTube authentication status"""
+    click.echo("📊 YouTube Authentication Status")
+    click.echo("=" * 40)
+    
+    async def check_status():
+        try:
+            from platforms.youtube.service import YouTubeService
+            from dotenv import load_dotenv
+            import os
+            
+            # Load environment
+            load_dotenv()
+            
+            # Check environment variables
+            client_id = os.getenv("YOUTUBE_CLIENT_ID")
+            client_secret = os.getenv("YOUTUBE_CLIENT_SECRET")
+            access_token = os.getenv("YOUTUBE_ACCESS_TOKEN")
+            refresh_token = os.getenv("YOUTUBE_REFRESH_TOKEN")
+            
+            click.echo(f"🔑 Client ID: {'✅ Set' if client_id else '❌ Missing'}")
+            click.echo(f"🔐 Client Secret: {'✅ Set' if client_secret else '❌ Missing'}")
+            click.echo(f"🎫 Access Token: {'✅ Found' if access_token else '❌ Missing'}")
+            click.echo(f"🔄 Refresh Token: {'✅ Found' if refresh_token else '❌ Missing'}")
+            
+            if not client_id or not client_secret:
+                click.echo("
+❌ Missing environment variables")
+                click.echo("Add YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET to .env")
+                return
+            
+            if not access_token or not refresh_token:
+                click.echo("
+❌ Missing authentication tokens")
+                click.echo("Run: python secure_youtube_auth.py")
+                return
+            
+            # Test service
+            service = YouTubeService()
+            
+            if await service.load_credentials() and service.is_authenticated():
+                click.echo("🔗 Authentication: ✅ Valid")
+                
+                # Test API call
+                try:
+                    channel_info = await service.get_channel_info()
+                    
+                    if channel_info:
+                        click.echo(f"
+📺 Channel Information:")
+                        click.echo(f"   Name: {channel_info['title']}")
+                        click.echo(f"   Subscribers: {channel_info['subscriber_count']:,}")
+                        click.echo(f"   Videos: {channel_info['video_count']:,}")
+                        click.echo(f"   Total Views: {channel_info['view_count']:,}")
+                        
+                        click.echo("
+✅ YouTube API is working correctly!")
+                    else:
+                        click.echo("⚠️ API working but no channel found")
+                        
+                except Exception as e:
+                    click.echo(f"❌ API test failed: {e}")
+            else:
+                click.echo("🔗 Authentication: ❌ Failed to load credentials")
+                click.echo("💡 Run: python secure_youtube_auth.py")
+                
+        except Exception as e:
+            click.echo(f"❌ Status check failed: {e}")
+    
+    asyncio.run(check_status())@cli.command()
+def demo():
+    """Run a complete demo of the system"""
+    click.echo("🎬 Running Talent Manager Demo")
+    click.echo("=" * 40)
+
+    # Check if Alex exists
+    db = SessionLocal()
+    alex = db.query(Talent).filter(Talent.name == "Alex CodeMaster").first()
+    db.close()
+
+    if not alex:
+        click.echo("Creating Alex CodeMaster...")
+        ctx = click.get_current_context()
+        ctx.invoke(create_alex)
+
+        # Refresh Alex
+        db = SessionLocal()
+        alex = db.query(Talent).filter(Talent.name == "Alex CodeMaster").first()
+        db.close()
+
+    if alex:
+        click.echo(f"Using Alex CodeMaster (ID: {alex.id})")
+
+        # Test content generation
+        ctx = click.get_current_context()
+        ctx.invoke(
+            generate,
+            talent_id=alex.id,
+            topic="Python Tips for Beginners",
+            content_type="long_form",
+        )
+    else:
+        click.echo("❌ Could not create or find Alex CodeMaster")
 
 
 @cli.command()
@@ -192,667 +464,571 @@ def run_server():
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
 
 
-# Add these commands to cli.py
+# ===============================
+# ALEX CODEMASTER COMMANDS
+# ===============================
 
-# Add these commands to cli.py
 
-import asyncio
-from core.pipeline.content_pipeline import (
-    ContentPipeline,
-    quick_generate_content,
-    quick_generate_and_upload,
+@cli.group()
+def alex():
+    """Alex CodeMaster specific commands"""
+    pass
+
+
+@alex.command()
+@click.option("--topic", help="Video topic (auto-generated if not provided)")
+@click.option(
+    "--type",
+    "content_type",
+    default="long_form",
+    type=click.Choice(["long_form", "short_form", "tutorial", "tips"]),
+    help="Content type",
 )
-from core.content.generator import PROGRAMMING_TOPICS, get_random_topic
-from platforms.youtube.service import YouTubeService
+@click.option("--upload", is_flag=True, help="Auto-upload to YouTube")
+def generate(topic, content_type, upload):
+    """Generate content for Alex CodeMaster"""
 
-
-@cli.command()
-def create_alex():
-    """Create Alex CodeMaster talent with predefined settings"""
-    click.echo("🎭 Creating Alex CodeMaster talent...")
-
-    from talents.education_specialist.alex_codemaster import AlexCodeMasterProfile
-
+    # Find Alex in database
     db = SessionLocal()
-
-    # Check if Alex already exists
-    existing = db.query(Talent).filter(Talent.name == "Alex CodeMaster").first()
-    if existing:
-        click.echo(f"✅ Alex CodeMaster already exists with ID: {existing.id}")
-        db.close()
-        return
-
-    # Create Alex CodeMaster
-    alex_profile = AlexCodeMasterProfile()
-    talent = Talent(
-        name=alex_profile.profile["basic_info"]["name"],
-        specialization=alex_profile.profile["basic_info"]["specialization"],
-        personality=alex_profile.profile["personality"],
-        is_active=True,
-    )
-
-    db.add(talent)
-    db.commit()
-    db.refresh(talent)
+    alex = db.query(Talent).filter(Talent.name == "Alex CodeMaster").first()
     db.close()
 
-    click.echo(f"✅ Alex CodeMaster created successfully!")
-    click.echo(f"   ID: {talent.id}")
-    click.echo(f"   Specialization: {talent.specialization}")
-    click.echo(f"   Personality: {talent.personality['tone']}")
+    if not alex:
+        click.echo(
+            "❌ Alex CodeMaster not found. Create with: python cli.py create-alex"
+        )
+        return
 
+    # Auto-generate topic if not provided
+    if not topic:
+        alex_topics = [
+            "5 AI Coding Tools That Will Change Your Life in 2025",
+            "Python Tips Every Developer Should Know",
+            "VS Code Extensions That Make You 10x More Productive",
+            "JavaScript Tricks That Will Blow Your Mind",
+            "Docker for Developers: Complete Guide",
+            "Git Commands Every Developer Must Master",
+            "React vs Vue: Which Should You Choose in 2025?",
+            "API Development Best Practices",
+            "Database Design Mistakes to Avoid",
+            "Clean Code Principles That Actually Work",
+        ]
+        import random
 
-@cli.command()
-@click.option("--talent-id", type=int, prompt="Talent ID", help="ID of the talent")
-@click.option("--topic", prompt="Topic", help="Content topic")
-@click.option(
-    "--type",
-    "content_type",
-    default="long_form",
-    type=click.Choice(["long_form", "shorts"]),
-    help="Content type",
-)
-@click.option("--upload/--no-upload", default=False, help="Auto-upload to YouTube")
-def generate(talent_id, topic, content_type, upload):
-    """Generate content for a talent"""
-    click.echo(f"🎬 Generating {content_type} content for talent {talent_id}: {topic}")
+        topic = random.choice(alex_topics)
+        click.echo(f"🎲 Auto-generated topic: {topic}")
 
-    async def run_generation():
+    click.echo(f"🎬 Generating {content_type} content for Alex CodeMaster...")
+    click.echo(f"📝 Topic: {topic}")
+
+    # Try enhanced pipeline first, then fallback to basic
+    async def _generate_alex():
+        enhanced_success = False
+
+        # Try enhanced pipeline first
         try:
-            if upload:
-                result = await quick_generate_and_upload(talent_id, topic, content_type)
-                click.echo("✅ Content generated and uploaded successfully!")
-                if "youtube_url" in result:
-                    click.echo(f"🎥 YouTube URL: {result['youtube_url']}")
-            else:
-                result = await quick_generate_content(talent_id, topic, content_type)
-                click.echo("✅ Content generated successfully!")
+            from core.pipeline.enhanced_content_pipeline import EnhancedContentPipeline
 
-            click.echo(f"📁 Video: {result.get('video_path', 'N/A')}")
-            click.echo(f"🎵 Audio: {result.get('audio_path', 'N/A')}")
-            click.echo(f"🖼️ Thumbnail: {result.get('thumbnail_path', 'N/A')}")
-            click.echo(f"⏱️ Duration: {result.get('estimated_duration', 0)} seconds")
+            enhanced_pipeline = EnhancedContentPipeline()
+            click.echo("🚀 Using enhanced pipeline with Alex's personality...")
 
-        except Exception as e:
-            click.echo(f"❌ Generation failed: {e}")
-
-    asyncio.run(run_generation())
-
-
-@cli.command()
-@click.option("--talent-id", type=int, prompt="Talent ID", help="ID of the talent")
-@click.option(
-    "--type",
-    "content_type",
-    default="long_form",
-    type=click.Choice(["long_form", "shorts"]),
-    help="Content type",
-)
-@click.option("--upload/--no-upload", default=False, help="Auto-upload to YouTube")
-def generate_random(talent_id, content_type, upload):
-    """Generate content with a random topic"""
-
-    topic = get_random_topic()
-    click.echo(f"🎲 Random topic selected: {topic}")
-
-    async def run_generation():
-        try:
-            if upload:
-                result = await quick_generate_and_upload(talent_id, topic, content_type)
-                click.echo("✅ Random content generated and uploaded!")
-                if "youtube_url" in result:
-                    click.echo(f"🎥 YouTube URL: {result['youtube_url']}")
-            else:
-                result = await quick_generate_content(talent_id, topic, content_type)
-                click.echo("✅ Random content generated!")
-
-            click.echo(f"📁 Files created in content/ directory")
-
-        except Exception as e:
-            click.echo(f"❌ Generation failed: {e}")
-
-    asyncio.run(run_generation())
-
-
-@cli.command()
-def topics():
-    """List available programming topics"""
-    click.echo("📚 Available Programming Topics:")
-    click.echo("")
-
-    for i, topic in enumerate(PROGRAMMING_TOPICS, 1):
-        click.echo(f"  {i:2d}. {topic}")
-
-    click.echo(f"\nTotal: {len(PROGRAMMING_TOPICS)} topics")
-
-
-@cli.command()
-def test_tts():
-    """Test text-to-speech generation"""
-    click.echo("🎵 Testing Text-to-Speech...")
-
-    async def run_test():
-        try:
-            from core.content.tts import TTSService
-
-            tts = TTSService()
-
-            click.echo(f"Provider: {tts.provider}")
-
-            test_text = "Hello! This is Alex CodeMaster. Welcome to today's programming tutorial."
-            audio_path = await tts.generate_speech(test_text, filename="test_tts.mp3")
-
-            click.echo(f"✅ TTS test successful!")
-            click.echo(f"📁 Audio saved to: {audio_path}")
-
-        except Exception as e:
-            click.echo(f"❌ TTS test failed: {e}")
-
-    asyncio.run(run_test())
-
-
-@cli.command()
-def youtube_auth():
-    """Authenticate with YouTube"""
-    click.echo("🔑 Starting YouTube authentication...")
-
-    async def run_auth():
-        try:
-            youtube = YouTubeService()
-            auth_url = await youtube.authenticate()
-
-            click.echo("📱 Please visit this URL to authenticate:")
-            click.echo(f"   {auth_url}")
-            click.echo("")
-            click.echo("After authorizing, copy the code from the redirect URL:")
-
-            code = click.prompt("Enter authorization code")
-
-            success = await youtube.handle_callback(code)
-            if success:
-                click.echo("✅ YouTube authentication successful!")
-
-                # Test by getting channel info
-                channel_info = await youtube.get_channel_info()
-                if channel_info:
-                    click.echo(f"📺 Channel: {channel_info.get('title', 'Unknown')}")
-                    click.echo(
-                        f"👥 Subscribers: {channel_info.get('subscriber_count', 0):,}"
-                    )
-                    click.echo(f"🎥 Videos: {channel_info.get('video_count', 0):,}")
-            else:
-                click.echo("❌ YouTube authentication failed!")
-
-        except Exception as e:
-            click.echo(f"❌ Authentication error: {e}")
-
-    asyncio.run(run_auth())
-
-
-@cli.command()
-def youtube_status():
-    """Check YouTube authentication status"""
-    click.echo("📊 Checking YouTube status...")
-
-    async def check_status():
-        try:
-            youtube = YouTubeService()
-
-            # Try to load existing credentials
-            authenticated = await youtube.load_credentials()
-
-            if authenticated:
-                click.echo("✅ YouTube: Authenticated")
-
-                # Get channel info
-                channel_info = await youtube.get_channel_info()
-                if channel_info:
-                    click.echo(f"📺 Channel: {channel_info.get('title', 'Unknown')}")
-                    click.echo(
-                        f"👥 Subscribers: {channel_info.get('subscriber_count', 0):,}"
-                    )
-                    click.echo(f"🎥 Videos: {channel_info.get('video_count', 0):,}")
-                    click.echo(f"👀 Total views: {channel_info.get('view_count', 0):,}")
-
-                # List recent videos
-                videos = await youtube.list_recent_videos(5)
-                if videos:
-                    click.echo("\n🎬 Recent videos:")
-                    for video in videos:
-                        click.echo(f"   • {video['title']} ({video['views']:,} views)")
-            else:
-                click.echo("❌ YouTube: Not authenticated")
-                click.echo("   Run 'python cli.py youtube-auth' to authenticate")
-
-        except Exception as e:
-            click.echo(f"❌ Status check failed: {e}")
-
-    asyncio.run(check_status())
-
-
-@cli.command()
-def test_pipeline():
-    """Test the complete content pipeline"""
-    click.echo("🧪 Testing content pipeline components...")
-
-    async def run_test():
-        try:
-            pipeline = ContentPipeline()
-            results = await pipeline.test_pipeline_components()
-
-            click.echo("\n🔍 Component Test Results:")
-            for component, status in results.items():
-                icon = "✅" if status else "❌"
-                click.echo(
-                    f"   {icon} {component.title()}: {'Working' if status else 'Failed'}"
-                )
-
-            # Calculate health
-            working = sum(1 for v in results.values() if v)
-            total = len(results)
-            health = (working / total) * 100
-
-            click.echo(
-                f"\n📊 System Health: {health:.1f}% ({working}/{total} components working)"
+            result = await enhanced_pipeline.create_enhanced_content(
+                talent_name="alex_codemaster",
+                topic=topic,
+                content_type=content_type,
+                auto_upload=upload,
+                use_runway=False,  # Start with False for stability
             )
 
-            if health >= 80:
-                click.echo("🟢 System Status: Healthy")
-            elif health >= 50:
-                click.echo("🟡 System Status: Degraded")
+            if result.get("success"):
+                enhanced_success = True
+                click.echo(f"\n✅ Alex's enhanced content created successfully!")
+                click.echo(f"📖 Title: {result.get('title', 'N/A')}")
+                click.echo(f"🆔 Job ID: {result.get('job_id', 'N/A')}")
+                click.echo(
+                    f"🎭 Enhanced with Alex's personality: {result.get('enhanced', False)}"
+                )
+                click.echo(f"⏱️  Duration: {result.get('duration', 'N/A')} seconds")
+
+                if result.get("video_path"):
+                    click.echo(f"🎥 Video: {result['video_path']}")
+                if result.get("audio_path"):
+                    click.echo(f"🎤 Audio: {result['audio_path']}")
+                if result.get("youtube_url"):
+                    click.echo(f"📺 YouTube: {result['youtube_url']}")
+
             else:
-                click.echo("🔴 System Status: Unhealthy")
+                click.echo(
+                    f"❌ Enhanced generation failed: {result.get('error', 'Unknown error')}"
+                )
 
         except Exception as e:
-            click.echo(f"❌ Pipeline test failed: {e}")
+            click.echo(f"⚠️  Enhanced pipeline not available: {e}")
 
-    asyncio.run(run_test())
+        # Fallback to basic generation if enhanced failed
+        if not enhanced_success:
+            click.echo("🔄 Falling back to basic content generation...")
+            try:
+                from core.pipeline.content_pipeline import quick_generate_content
+
+                result = await quick_generate_content(alex.id, topic, content_type)
+
+                if result.get("success"):
+                    click.echo(f"\n✅ Alex's basic content generated!")
+                    click.echo(f"📖 Title: {result.get('title', 'N/A')}")
+                    if result.get("video_path"):
+                        click.echo(f"🎥 Video: {result['video_path']}")
+
+                    click.echo(
+                        f"\n💡 Tip: Set up the enhanced pipeline for better Alex content!"
+                    )
+                else:
+                    click.echo(
+                        f"❌ Basic generation also failed: {result.get('error')}"
+                    )
+
+            except Exception as e:
+                click.echo(f"❌ All generation methods failed: {e}")
+                click.echo(f"💡 Check your configuration and dependencies")
+
+    asyncio.run(_generate_alex())
 
 
-@cli.command()
-@click.option("--talent-id", type=int, help="Filter by talent ID")
-def list_content(talent_id):
-    """List generated content"""
-    click.echo("📋 Generated Content:")
+@alex.command()
+def status():
+    """Show Alex CodeMaster status"""
+    click.echo("🤖 Alex CodeMaster Status")
+    click.echo("=" * 40)
 
+    # Check if Alex exists in database
     db = SessionLocal()
-    query = db.query(ContentItem)
-
-    if talent_id:
-        query = query.filter(ContentItem.talent_id == talent_id)
-
-    content_items = query.order_by(ContentItem.created_at.desc()).limit(10).all()
+    alex = db.query(Talent).filter(Talent.name == "Alex CodeMaster").first()
     db.close()
 
-    if not content_items:
-        click.echo("No content found.")
+    if alex:
+        click.echo(f"✅ Alex CodeMaster found (ID: {alex.id})")
+        click.echo(f"📚 Specialization: {alex.specialization}")
+        click.echo(f"🔄 Status: {'Active' if alex.is_active else 'Inactive'}")
+
+        if alex.personality:
+            click.echo("\n🎭 Personality traits:")
+            for key, value in alex.personality.items():
+                if isinstance(value, list):
+                    click.echo(f"  {key}: {', '.join(value[:3])}...")
+                else:
+                    click.echo(f"  {key}: {value}")
+    else:
+        click.echo("❌ Alex CodeMaster not found")
+        click.echo("Create with: python cli.py create-alex")
+
+    # Check available pipelines
+    click.echo(f"\n⚙️  Available Pipelines:")
+
+    # Enhanced pipeline
+    try:
+        from core.pipeline.enhanced_content_pipeline import EnhancedContentPipeline
+
+        click.echo("✅ Enhanced pipeline (with Alex personality)")
+    except ImportError:
+        click.echo("❌ Enhanced pipeline not available")
+
+    # Basic pipeline
+    try:
+        from core.pipeline.content_pipeline import ContentPipeline
+
+        click.echo("✅ Basic content pipeline")
+    except ImportError:
+        click.echo("❌ Basic pipeline not available")
+
+    # Content count
+    if alex:
+        db = SessionLocal()
+        content_count = (
+            db.query(ContentItem).filter(ContentItem.talent_id == alex.id).count()
+        )
+        db.close()
+        click.echo(f"\n📊 Content created: {content_count} items")
+
+
+@alex.command()
+@click.option("--topic", required=True, help="Test topic")
+def test(topic):
+    """Test Alex's content generation (dry run)"""
+    click.echo(f"🧪 Testing Alex's content generation for: {topic}")
+
+    db = SessionLocal()
+    alex = db.query(Talent).filter(Talent.name == "Alex CodeMaster").first()
+    db.close()
+
+    if not alex:
+        click.echo(
+            "❌ Alex CodeMaster not found. Create with: python cli.py create-alex"
+        )
         return
 
-    for item in content_items:
-        status_icon = {
-            "draft": "📝",
-            "generating": "⚙️",
-            "generated": "✅",
-            "published": "🎥",
-            "failed": "❌",
-        }.get(item.status, "❓")
-
-        click.echo(f"\n{status_icon} {item.title}")
-        click.echo(
-            f"   ID: {item.id} | Type: {item.content_type} | Status: {item.status}"
-        )
-        click.echo(f"   Created: {item.created_at.strftime('%Y-%m-%d %H:%M')}")
-
-        if item.platform_id:
-            click.echo(f"   🎥 YouTube: https://youtube.com/watch?v={item.platform_id}")
-
-
-@cli.command()
-@click.option("--talent-id", type=int, prompt="Talent ID", help="ID of the talent")
-@click.option("--topic", prompt="Topic", help="Content topic")
-@click.option(
-    "--type",
-    "content_type",
-    default="long_form",
-    type=click.Choice(["long_form", "shorts"]),
-    help="Content type",
-)
-def generate_audio_only(talent_id, topic, content_type):
-    """Generate script and audio without video creation"""
-    click.echo(f"🎵 Generating audio-only content for talent {talent_id}: {topic}")
-
-    async def run_generation():
+    async def _test_alex():
         try:
-            from core.content.generator import ContentGenerator, ContentRequest
-            from core.content.tts import TTSService, TALENT_VOICE_PROFILES
-            from core.database.config import SessionLocal
-            from core.database.models import Talent, ContentItem
+            # Test enhanced pipeline if available
+            from core.pipeline.enhanced_content_pipeline import EnhancedContentPipeline
 
-            # Get talent
-            db = SessionLocal()
-            talent = db.query(Talent).filter(Talent.id == talent_id).first()
-            if not talent:
-                click.echo(f"❌ Talent {talent_id} not found")
-                db.close()
+            enhanced_pipeline = EnhancedContentPipeline()
+            alex_instance = enhanced_pipeline.alex_codemaster
+
+            click.echo(f"✅ Alex instance loaded: {alex_instance.name}")
+            click.echo(f"🎯 Specialization: {alex_instance.specialization}")
+
+            # Test content request generation
+            content_request = await alex_instance.generate_content_request(
+                topic=topic, content_type="long_form"
+            )
+
+            click.echo(f"\n📝 Content Request Generated:")
+            click.echo(f"📖 Topic: {content_request['topic']}")
+            click.echo(f"📋 Type: {content_request['content_type']}")
+            click.echo(f"👥 Audience: {content_request['target_audience']}")
+
+            click.echo(f"\n✅ Test completed successfully!")
+            click.echo(f"💡 Alex is ready to generate content!")
+
+        except ImportError:
+            click.echo("❌ Enhanced pipeline not available for testing")
+            click.echo("💡 Basic pipeline test not implemented yet")
+        except Exception as e:
+            click.echo(f"❌ Test failed: {e}")
+
+    asyncio.run(_test_alex())
+
+
+@alex.command()
+def config():
+    """Show Alex's configuration"""
+    db = SessionLocal()
+    alex = db.query(Talent).filter(Talent.name == "Alex CodeMaster").first()
+    db.close()
+
+    if not alex:
+        click.echo("❌ Alex CodeMaster not found")
+        return
+
+    click.echo("🤖 Alex CodeMaster Configuration")
+    click.echo("=" * 50)
+
+    click.echo(f"Name: {alex.name}")
+    click.echo(f"ID: {alex.id}")
+    click.echo(f"Specialization: {alex.specialization}")
+    click.echo(f"Status: {'Active' if alex.is_active else 'Inactive'}")
+
+    if alex.personality:
+        click.echo(f"\n🎭 Personality Configuration:")
+        for key, value in alex.personality.items():
+            if isinstance(value, list):
+                click.echo(f"  {key}:")
+                for item in value[:5]:  # Show first 5 items
+                    click.echo(f"    • {item}")
+                if len(value) > 5:
+                    click.echo(f"    ... and {len(value) - 5} more")
+            else:
+                click.echo(f"  {key}: {value}")
+
+
+autonomous_orchestrator = None
+
+
+def get_or_create_orchestrator():
+    """Get or create the autonomous orchestrator with persistent config"""
+    global autonomous_orchestrator
+
+    if not autonomous_orchestrator:
+        from core.autonomous.talent_orchestrator import AutonomousTalentOrchestrator
+
+        autonomous_orchestrator = AutonomousTalentOrchestrator()
+
+        # Load persistent talent registrations
+        config_file = Path("autonomous_config.json")
+        if config_file.exists():
+            try:
+                with open(config_file, "r") as f:
+                    config = json.load(f)
+
+                for talent_name, talent_config in config.get("talents", {}).items():
+                    asyncio.run(
+                        autonomous_orchestrator.register_talent(
+                            talent_name,
+                            talent_config["specialization"],
+                            talent_config["config"],
+                        )
+                    )
+
+                print(f"✅ Loaded {len(config.get('talents', {}))} talents from config")
+            except Exception as e:
+                print(f"⚠️ Warning: Could not load config: {e}")
+
+    return autonomous_orchestrator
+
+
+def save_talent_config(talent_name: str, specialization: str, config: dict):
+    """Save talent configuration persistently"""
+    config_file = Path("autonomous_config.json")
+
+    # Load existing config
+    autonomous_config = {}
+    if config_file.exists():
+        try:
+            with open(config_file, "r") as f:
+                autonomous_config = json.load(f)
+        except:
+            autonomous_config = {}
+
+    # Update with new talent
+    if "talents" not in autonomous_config:
+        autonomous_config["talents"] = {}
+
+    autonomous_config["talents"][talent_name] = {
+        "specialization": specialization,
+        "config": config,
+        "registered_at": datetime.now().isoformat(),
+    }
+
+    # Save config
+    with open(config_file, "w") as f:
+        json.dump(autonomous_config, f, indent=2)
+
+
+@cli.group()
+def autonomous():
+    """Autonomous talent management commands"""
+    pass
+
+
+@autonomous.command()
+@click.option("--talent", required=True, help="Talent name")
+@click.option("--specialization", required=True, help="Talent specialization")
+@click.option("--research-interval", default=24, help="Research interval in hours")
+def register(talent, specialization, research_interval):
+    """Register a talent for autonomous operation"""
+
+    click.echo(f"📝 Registering {talent} for autonomous operation...")
+
+    async def _register():
+        orchestrator = get_or_create_orchestrator()
+
+        config = {
+            "research_interval_hours": research_interval,
+            "autonomous_enabled": True,
+            "auto_upload": True,
+        }
+
+        await orchestrator.register_talent(talent, specialization, config)
+
+        # Save persistently
+        save_talent_config(talent, specialization, config)
+
+        click.echo(f"✅ {talent} registered for autonomous operation")
+
+    asyncio.run(_register())
+
+
+@autonomous.command()
+def start():
+    """Start autonomous operation for all registered talents"""
+
+    click.echo("🚀 Starting autonomous talent operation...")
+
+    async def _start():
+        orchestrator = get_or_create_orchestrator()
+
+        if not orchestrator.active_talents:
+            click.echo("❌ No talents registered.")
+            click.echo("💡 Run 'python cli.py setup-alex-autonomous' first")
+            return
+
+        click.echo(
+            f"📊 Starting with {len(orchestrator.active_talents)} registered talents:"
+        )
+        for name in orchestrator.active_talents.keys():
+            click.echo(f"   • {name}")
+
+        await orchestrator.start_autonomous_operation()
+
+    try:
+        asyncio.run(_start())
+    except KeyboardInterrupt:
+        click.echo("\n⏹️ Autonomous operation stopped by user")
+
+
+@autonomous.command()
+@click.option("--talent", help="Specific talent name (optional)")
+def status(talent):
+    """Check autonomous operation status"""
+
+    async def _status():
+        orchestrator = get_or_create_orchestrator()
+
+        status_data = await orchestrator.get_talent_status(talent)
+
+        if talent:
+            if "error" in status_data:
+                click.echo(f"❌ {status_data['error']}")
                 return
 
-            click.echo(f"👤 Using talent: {talent.name}")
+            click.echo(f"📊 Status for {talent}:")
+            click.echo(f"   Status: {status_data.get('status', 'Unknown')}")
+            click.echo(f"   Queue: {status_data.get('queue_length', 0)} items")
+            click.echo(f"   Running: {status_data.get('running_jobs', 0)} jobs")
 
-            # Generate content
-            click.echo("🧠 Generating script with OpenAI...")
-            generator = ContentGenerator()
-            request = ContentRequest(
-                talent_name=talent.name, topic=topic, content_type=content_type
-            )
-
-            content = await generator.generate_content(request)
-            click.echo(f"✅ Script generated: {content.title}")
-            click.echo(f"📝 Script length: {len(content.script)} characters")
-
-            # Generate audio with automatic fallback
-            click.echo("🎵 Generating audio (will fallback to free TTS if needed)...")
-            tts = TTSService()
-            voice_settings = TALENT_VOICE_PROFILES.get(talent.name, {}).get(
-                tts.provider, {}
-            )
-
-            try:
-                audio_filename = f"audio_{talent_id}_{topic.replace(' ', '_').replace('/', '_')[:30]}.mp3"
-                audio_path = await tts.generate_speech(
-                    content.script, voice_settings, audio_filename
-                )
-
-                # Check if fallback was used
-                if "gtts_fallback" in audio_path:
-                    click.echo("⚠️ ElevenLabs quota exceeded - used free gTTS fallback")
-                    tts_provider_used = "gTTS (fallback)"
-                else:
-                    tts_provider_used = tts.provider
-
-            except Exception as tts_error:
-                click.echo(f"⚠️ TTS generation failed: {tts_error}")
-                click.echo("📝 Continuing with script-only generation...")
-                audio_path = None
-                tts_provider_used = "none"
-
-            # Save to database
-            click.echo("💾 Saving to database...")
-            content_item = ContentItem(
-                talent_id=talent_id,
-                title=content.title,
-                description=content.description,
-                script=content.script,
-                content_type=content_type,
-                platform="youtube",
-                audio_url=audio_path if audio_path else None,
-                status="generated" if audio_path else "script_only",
-            )
-            db.add(content_item)
-            db.commit()
-            db.refresh(content_item)
-            db.close()
-
-            click.echo("\n🎉 Content generated successfully!")
-            click.echo("=" * 50)
-            click.echo(f"📺 Title: {content.title}")
-            click.echo(f"🆔 Content ID: {content_item.id}")
-            click.echo(f"🎵 TTS Provider: {tts_provider_used}")
-            if audio_path:
-                click.echo(f"📁 Audio file: {audio_path}")
-                click.echo(
-                    f"⏱️ Estimated duration: {content.estimated_duration // 60}m {content.estimated_duration % 60}s"
-                )
-            else:
-                click.echo("📝 Script-only generation (no audio)")
-            click.echo(f"📊 Script words: ~{len(content.script.split())} words")
-            click.echo("=" * 50)
-
-            click.echo("\n📋 Generated Content Preview:")
-            click.echo(f"Description: {content.description[:200]}...")
-            click.echo(f"Tags: {', '.join(content.tags[:5])}")
-
-            click.echo("\n🎯 Next Steps:")
-            click.echo("1. Listen to the audio file to review quality")
-            click.echo("2. Manually upload to YouTube as audio-only video")
-            click.echo("3. Install MoviePy for full video generation later")
-            click.echo("4. Set up YouTube API for automated uploads")
-
-        except Exception as e:
-            click.echo(f"❌ Generation failed: {e}")
-            import traceback
-
-            traceback.print_exc()
-
-    asyncio.run(run_generation())
-    """Run a complete demo of the system"""
-    click.echo("🎬 Running Talent Manager Demo!")
-    click.echo("===============================")
-
-    async def run_demo():
-        try:
-            # Step 1: Create Alex if not exists
-            click.echo("\n1️⃣ Setting up Alex CodeMaster...")
-
-            db = SessionLocal()
-            alex = db.query(Talent).filter(Talent.name == "Alex CodeMaster").first()
-
-            if not alex:
-                from talents.education_specialist.alex_codemaster import (
-                    AlexCodeMasterProfile,
-                )
-
-                alex_profile = AlexCodeMasterProfile()
-                alex = Talent(
-                    name=alex_profile.profile["basic_info"]["name"],
-                    specialization=alex_profile.profile["basic_info"]["specialization"],
-                    personality=alex_profile.profile["personality"],
-                    is_active=True,
-                )
-                db.add(alex)
-                db.commit()
-                db.refresh(alex)
-                click.echo("✅ Alex CodeMaster created!")
-            else:
-                click.echo("✅ Alex CodeMaster already exists!")
-
-            db.close()
-
-            # Step 2: Test components
-            click.echo("\n2️⃣ Testing system components...")
-            pipeline = ContentPipeline()
-            results = await pipeline.test_pipeline_components()
-
-            working_components = sum(1 for v in results.values() if v)
-            click.echo(f"✅ {working_components}/{len(results)} components working")
-
-            # Step 3: Generate sample content
-            click.echo("\n3️⃣ Generating sample content...")
-            topic = "Python Functions: Complete Beginner's Guide"
-            click.echo(f"📚 Topic: {topic}")
-
-            result = await quick_generate_content(alex.id, topic, "long_form")
-
-            click.echo("✅ Content generated successfully!")
-            click.echo(f"📁 Video: {result.get('video_path', 'N/A')}")
-            click.echo(f"⏱️ Duration: {result.get('estimated_duration', 0)} seconds")
-
-            click.echo("\n🎉 Demo completed successfully!")
-            click.echo("\nNext steps:")
-            click.echo("- Run 'python cli.py youtube-auth' to set up YouTube")
-            click.echo(
-                "- Run 'python cli.py generate --talent-id {} --upload' to create and upload content".format(
-                    alex.id
-                )
-            )
-
-        except Exception as e:
-            click.echo(f"❌ Demo failed: {e}")
-
-    asyncio.run(run_demo())
-
-
-# Add this command to cli.py for smart TTS handling
-
-
-@cli.command()
-def setup_tts():
-    """Set up TTS provider with automatic detection and fallback"""
-    click.echo("🎵 Setting up Text-to-Speech provider...")
-
-    # Check what's available
-    elevenlabs_available = False
-    gtts_available = False
-
-    try:
-        from elevenlabs.client import ElevenLabs
-
-        api_key = os.getenv("ELEVENLABS_API_KEY")
-        if api_key:
-            # Test ElevenLabs quota
-            try:
-                client = ElevenLabs(api_key=api_key)
-                # Try a very short test
-                test_audio = client.text_to_speech.convert(
-                    text="Test",
-                    voice_id="21m00Tcm4TlvDq8ikWAM",
-                    model_id="eleven_monolingual_v1",
-                )
-                # If we get here, ElevenLabs is working
-                elevenlabs_available = True
-                click.echo("✅ ElevenLabs: Available with credits")
-            except Exception as e:
-                if "quota" in str(e).lower() or "credit" in str(e).lower():
-                    click.echo("⚠️ ElevenLabs: Quota exceeded")
-                else:
-                    click.echo(f"❌ ElevenLabs: Error - {e}")
+            if status_data.get("next_scheduled"):
+                click.echo(f"   Next scheduled: {status_data['next_scheduled']}")
         else:
-            click.echo("❌ ElevenLabs: No API key found")
-    except ImportError:
-        click.echo("❌ ElevenLabs: Not installed")
-
-    try:
-        from gtts import gTTS
-
-        gtts_available = True
-        click.echo("✅ gTTS: Available (free)")
-    except ImportError:
-        click.echo("❌ gTTS: Not installed")
-
-    # Recommend best option
-    click.echo("\n🎯 Recommendation:")
-    if elevenlabs_available:
-        click.echo("✅ Use ElevenLabs (high quality)")
-        recommended_provider = "elevenlabs"
-    elif gtts_available:
-        click.echo("✅ Use gTTS (free, basic quality)")
-        recommended_provider = "gtts"
-    else:
-        click.echo("❌ Install at least one TTS provider:")
-        click.echo("   For premium: Keep ElevenLabs, wait for credits to refill")
-        click.echo("   For free: poetry add gtts")
-        return
-
-    # Update .env file
-    env_file = Path(".env")
-    if env_file.exists():
-        # Read current .env
-        with open(env_file, "r") as f:
-            lines = f.readlines()
-
-        # Update or add TTS_PROVIDER
-        updated = False
-        for i, line in enumerate(lines):
-            if line.startswith("TTS_PROVIDER="):
-                lines[i] = f"TTS_PROVIDER={recommended_provider}\n"
-                updated = True
-                break
-
-        if not updated:
-            lines.append(f"TTS_PROVIDER={recommended_provider}\n")
-
-        # Write back to .env
-        with open(env_file, "w") as f:
-            f.writelines(lines)
-
-        click.echo(f"✅ Updated .env with TTS_PROVIDER={recommended_provider}")
-
-    click.echo("\n🧪 Testing TTS setup...")
-
-    # Test the TTS system
-    async def test_tts():
-        try:
-            from core.content.tts import TTSService
-
-            tts = TTSService()
-
-            test_audio = await tts.generate_speech(
-                "Hello, this is a test of the TTS system.",
-                filename="tts_setup_test.mp3",
+            click.echo("📊 Overall Autonomous Status:")
+            click.echo(
+                f"   Orchestrator running: {status_data.get('orchestrator_running', False)}"
             )
+            click.echo(f"   Total talents: {status_data.get('total_talents', 0)}")
+            click.echo(f"   Active talents: {status_data.get('active_talents', 0)}")
+            click.echo(f"   Queue length: {status_data.get('total_queue', 0)}")
+            click.echo(f"   Running jobs: {status_data.get('running_jobs', 0)}")
 
-            click.echo(f"✅ TTS test successful with {tts.provider}")
-            click.echo(f"📁 Test audio: {test_audio}")
+            if status_data.get("talents"):
+                click.echo(
+                    f"   Registered talents: {', '.join(status_data['talents'])}"
+                )
 
-        except Exception as e:
-            click.echo(f"❌ TTS test failed: {e}")
-
-    import asyncio
-
-    asyncio.run(test_tts())
+    asyncio.run(_status())
 
 
-@cli.command()
-def install_free_tts():
-    """Install free TTS alternative"""
-    click.echo("📦 Installing free TTS (gTTS)...")
+@autonomous.command()
+@click.option("--talent", required=True, help="Talent name")
+def research(talent):
+    """Trigger manual research for a talent"""
 
-    try:
-        import subprocess
+    click.echo(f"🔍 Starting research for {talent}...")
 
-        result = subprocess.run(
-            ["poetry", "add", "gtts"], capture_output=True, text=True
+    async def _research():
+        from core.research.autonomous_researcher import AutonomousResearcher
+
+        specialization = "tech_education"  # Default for Alex
+
+        async with AutonomousResearcher(specialization) as researcher:
+            topics = await researcher.research_trending_topics(limit=20)
+
+        click.echo(f"📊 Found {len(topics)} trending topics:")
+
+        for i, topic in enumerate(topics[:10], 1):
+            click.echo(f"  {i:2d}. {topic.title[:80]}...")
+            click.echo(f"      Source: {topic.source}")
+            click.echo(f"      Score: {topic.content_potential:.2f}")
+            click.echo(f"      Category: {topic.category}")
+            click.echo()
+
+    asyncio.run(_research())
+
+
+@autonomous.command()
+@click.option("--talent", required=True, help="Talent name")
+def generate_now(talent):
+    """Generate content immediately for a talent"""
+
+    click.echo(f"🎬 Generating autonomous content for {talent}...")
+
+    async def _generate():
+        from core.pipeline.enhanced_content_pipeline import EnhancedContentPipeline
+
+        pipeline = EnhancedContentPipeline()
+
+        result = await pipeline.create_enhanced_content(
+            talent_name=talent,
+            topic=None,  # Let it pick autonomously
+            content_type="long_form",
+            auto_upload=True,
         )
 
-        if result.returncode == 0:
-            click.echo("✅ gTTS installed successfully!")
-
-            # Update .env to use gTTS
-            env_file = Path(".env")
-            if env_file.exists():
-                with open(env_file, "a") as f:
-                    f.write("\nTTS_PROVIDER=gtts\n")
-                click.echo("✅ Updated .env to use gTTS")
-
-            click.echo("\n🧪 Testing free TTS...")
-
-            # Test gTTS
-            async def test_gtts():
-                try:
-                    from core.content.tts import TTSService
-
-                    tts = TTSService()
-
-                    test_audio = await tts.generate_speech(
-                        "Hello, this is a test of the free TTS system.",
-                        filename="free_tts_test.mp3",
-                    )
-
-                    click.echo(f"✅ Free TTS working! Audio: {test_audio}")
-
-                except Exception as e:
-                    click.echo(f"❌ Free TTS test failed: {e}")
-
-            import asyncio
-
-            asyncio.run(test_gtts())
-
+        if result.get("success"):
+            click.echo("✅ Autonomous content generated successfully!")
+            click.echo(f"📖 Title: {result.get('title')}")
+            click.echo(f"🎥 Video: {result.get('video_path')}")
+            click.echo(f"📺 YouTube: {result.get('youtube_url', 'Not uploaded')}")
         else:
-            click.echo(f"❌ Installation failed: {result.stderr}")
+            click.echo(f"❌ Generation failed: {result.get('error')}")
 
-    except Exception as e:
-        click.echo(f"❌ Installation error: {e}")
-        click.echo("Try manually: poetry add gtts")
+    asyncio.run(_generate())
+
+
+@cli.command()
+def setup_alex_autonomous():
+    """Quick setup for Alex's autonomous operation"""
+
+    click.echo("🤖 Setting up Alex for full autonomous operation...")
+
+    async def _setup():
+        from core.research.autonomous_researcher import AutonomousResearcher
+
+        # Register Alex with persistent config
+        alex_config = {
+            "research_interval_hours": 12,
+            "autonomous_enabled": True,
+            "auto_upload": True,
+            "content_frequency": 0.5,
+            "quality_threshold": 0.6,
+        }
+
+        # Save the config persistently
+        save_talent_config("Alex CodeMaster", "tech_education", alex_config)
+
+        # Register with orchestrator
+        orchestrator = get_or_create_orchestrator()
+        await orchestrator.register_talent(
+            "Alex CodeMaster", "tech_education", alex_config
+        )
+
+        click.echo("✅ Alex registered for autonomous operation")
+        click.echo("🔍 Starting initial research...")
+
+        async with AutonomousResearcher("tech_education") as researcher:
+            topics = await researcher.research_trending_topics(limit=10)
+
+        click.echo(f"📊 Found {len(topics)} trending topics for Alex")
+
+        if topics:
+            click.echo("🎯 Top 3 topics Alex could cover:")
+            for i, topic in enumerate(topics[:3], 1):
+                click.echo(
+                    f"  {i}. {topic.title[:60]}... (Score: {topic.content_potential:.2f})"
+                )
+
+        click.echo("\n🚀 Alex is now ready for autonomous operation!")
+        click.echo(
+            "Run 'python cli.py autonomous start' to begin autonomous content creation"
+        )
+
+    asyncio.run(_setup())
 
 
 if __name__ == "__main__":
     cli()
+
+@cli.command()
+def youtube_status():
+    """Check YouTube authentication status"""
+    click.echo("📊 YouTube Authentication Status")
+    
+    async def check_status():
+        try:
+            from platforms.youtube.service import YouTubeService
+            from dotenv import load_dotenv
+            import os
+            
+            load_dotenv()
+            service = YouTubeService()
+            
+            if await service.load_credentials() and service.is_authenticated():
+                channel_info = await service.get_channel_info()
+                click.echo("✅ YouTube API is working correctly!")
+                click.echo(f"📺 Channel: {channel_info['title']}")
+                click.echo(f"👥 Subscribers: {channel_info['subscriber_count']:,}")
+            else:
+                click.echo("❌ Authentication failed")
+                
+        except Exception as e:
+            click.echo(f"❌ Error: {e}")
+    
+    asyncio.run(check_status())

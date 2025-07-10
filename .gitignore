@@ -1,10 +1,62 @@
-# .gitignore
+# =================================================================
+# 🔐 SECURITY-FOCUSED .gitignore FOR TALENT MANAGER
+# =================================================================
 
-# Python
+# =================================================================
+# 🚫 CRITICAL SECURITY FILES - NEVER COMMIT THESE!
+# =================================================================
+
+# Environment files containing sensitive data
+.env
+.env.local
+.env.development
+.env.staging  
+.env.production
+.env.test
+.environment
+
+# Credential files and directories
+credentials/
+secrets/
+keys/
+certs/
+*.json
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# API keys and tokens
+*api_key*
+*secret*
+*token*
+*password*
+client_secrets*.json
+service_account*.json
+
+# Backup files that might contain sensitive data
+*.backup
+*.bak
+*.old
+*.orig
+*.save
+*.swp
+*.tmp
+
+# =================================================================
+# 🐍 PYTHON SPECIFIC
+# =================================================================
+
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
+
+# C extensions
 *.so
+
+# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -94,9 +146,6 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-.env
-.venv
-env/
 venv/
 ENV/
 env.bak/
@@ -120,28 +169,73 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# Project specific
+# =================================================================
+# 🗄️ DATABASE FILES
+# =================================================================
+
+# SQLite databases
 *.db
+*.sqlite
 *.sqlite3
+*.db-journal
+
+# Database dumps
+*.sql
+*.dump
+
+# =================================================================
+# 📁 CONTENT AND MEDIA FILES
+# =================================================================
+
+# Generated content directories
 content/
-data/
-logs/
-temp/
 uploads/
+media/
+static/media/
+temp/
+tmp/
+cache/
 
-# API Keys and sensitive data
-.env.local
-.env.production
-secrets.json
+# Large media files
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.wmv
+*.flv
+*.webm
+*.mp3
+*.wav
+*.flac
+*.aac
+*.ogg
 
-# IDE
+# Images (except small assets)
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.tiff
+*.svg
+# Exception for small logos/icons:
+!assets/icons/*.png
+!assets/logos/*.svg
+
+# =================================================================
+# 🔧 DEVELOPMENT TOOLS
+# =================================================================
+
+# IDEs and editors
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
+.sublime-project
+.sublime-workspace
 
-# OS
+# OS generated files
 .DS_Store
 .DS_Store?
 ._*
@@ -149,9 +243,142 @@ secrets.json
 .Trashes
 ehthumbs.db
 Thumbs.db
+desktop.ini
 
-# Docker
-.dockerignorecredentials/youtube_credentials.json
-.credentials/
-credentials/*.json
-credentials/
+# =================================================================
+# 🐳 DOCKER & CONTAINERIZATION
+# =================================================================
+
+# Docker files with sensitive data
+docker-compose.override.yml
+docker-compose.prod.yml
+.dockerignore
+
+# Container data volumes
+docker-data/
+postgres-data/
+redis-data/
+
+# =================================================================
+# ☁️ CLOUD & DEPLOYMENT
+# =================================================================
+
+# AWS
+.aws/
+aws-config/
+
+# Google Cloud
+.gcloud/
+gcp-config/
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+terraform.tfvars
+
+# Kubernetes
+k8s-secrets/
+*.kubeconfig
+
+# =================================================================
+# 📊 LOGS AND MONITORING
+# =================================================================
+
+# Log files
+logs/
+*.log
+*.out
+*.err
+
+# Monitoring data
+metrics/
+traces/
+
+# =================================================================
+# 🧪 TESTING
+# =================================================================
+
+# Test artifacts
+test-results/
+.coverage
+htmlcov/
+.pytest_cache/
+
+# =================================================================
+# 📦 PACKAGE MANAGERS
+# =================================================================
+
+# npm
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Poetry
+poetry.lock  # Comment out if you want to commit lock file
+
+# =================================================================
+# 🔄 RUNTIME AND TEMPORARY FILES
+# =================================================================
+
+# Runtime directories
+run/
+pid/
+
+# Temporary processing files
+processing/
+queue/
+staged/
+
+# Session files
+sessions/
+
+# =================================================================
+# 📱 PLATFORM-SPECIFIC IGNORES
+# =================================================================
+
+# YouTube processing files
+youtube-dl/
+youtube_cache/
+
+# TikTok processing files  
+tiktok_cache/
+
+# Instagram processing files
+instagram_cache/
+
+# =================================================================
+# 💼 BUSINESS AND LEGAL
+# =================================================================
+
+# Analytics and reports (may contain sensitive data)
+reports/
+analytics/
+metrics/
+
+# Legal documents
+legal/
+contracts/
+agreements/
+
+# =================================================================
+# 🚨 SECURITY REMINDERS
+# =================================================================
+
+# If you accidentally commit sensitive files:
+# 1. Remove them: git rm --cached filename
+# 2. Add to .gitignore: echo "filename" >> .gitignore  
+# 3. Commit changes: git commit -m "Remove sensitive file"
+# 4. Consider rotating any exposed credentials
+# 5. For severe cases, use: git filter-branch or BFG Repo-Cleaner
+
+# NEVER commit:
+# - API keys or tokens
+# - Database credentials  
+# - SSL certificates
+# - User data
+# - Generated content files
+# - Large binary files
+# - Temporary files
+# - Local configuration
