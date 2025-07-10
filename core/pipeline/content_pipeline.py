@@ -58,11 +58,11 @@ class ContentPipeline:
         """Lazy load video creator"""
         if self._video_creator is None:
             try:
-                from core.content.enhanced_video_creator import (
-                    EnhancedVideoCreator as VideoCreator,
+                from core.content.video_creator import (
+                    VideoCreator,
                 )
 
-                self._video_creator = EnhancedEnhancedVideoCreator()
+                self._video_creator = VideoCreator()
             except ImportError as e:
                 logger.error(f"Could not import VideoCreator: {e}")
                 raise
