@@ -9,6 +9,8 @@ from typing import Dict, Optional, Any
 from datetime import datetime
 from pathlib import Path
 import json
+from core.content.script_cleaner import ScriptCleaner
+
 
 logger = logging.getLogger(__name__)
 
@@ -145,8 +147,12 @@ class ContentPipeline:
                 voice_settings = {}
 
             try:
+                clean_script = ScriptCleaner.extract_spoken_content(
+                    generated_content.script, talent.name
+                )
+
                 audio_path = await self.tts_service.generate_speech(
-                    generated_content.script,
+                    clean_script,  # Clean script for TTS
                     voice_settings,
                     f"audio_{content_item.id}.mp3",
                 )

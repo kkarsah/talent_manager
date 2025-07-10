@@ -273,18 +273,24 @@ def test_pipeline():
 
 
 @cli.command()
-@click.option("--text", default="Hello, this is a test of the text-to-speech system.")
+@click.argument("text", default="Hello! This is a test of the TTS system.")
 def test_tts(text):
-    """Test text-to-speech generation"""
-    click.echo("🎤 Testing TTS system...")
+    """Test text-to-speech generation with script cleaning"""
+    click.echo("🎤 Testing TTS system with script cleaning...")
 
     async def _test_tts():
         try:
             from core.content.tts import TTSService
+            from core.content.script_cleaner import ScriptCleaner
+
+            # Clean the test text (in case it has formatting)
+            clean_text = ScriptCleaner.extract_spoken_content(text)
+            click.echo(f"📝 Cleaned text: {clean_text[:100]}...")
 
             tts_service = TTSService()
-
-            audio_path = await tts_service.generate_speech(text, {}, "test_tts.mp3")
+            audio_path = await tts_service.generate_speech(
+                clean_text, {}, "test_tts.mp3"
+            )
 
             if audio_path and Path(audio_path).exists():
                 click.echo(f"✅ TTS test successful! Audio saved to: {audio_path}")
@@ -664,6 +670,209 @@ def config():
                     click.echo(f"    ... and {len(value) - 5} more")
             else:
                 click.echo(f"  {key}: {value}")
+
+
+autonomous_orchestrator = None
+
+
+@cli.group()
+def autonomous():
+    """Autonomous talent management commands"""
+    pass
+
+
+@autonomous.command()
+@click.option("--talent", required=True, help="Talent name")
+@click.option("--specialization", required=True, help="Talent specialization")
+@click.option("--research-interval", default=24, help="Research interval in hours")
+def register(talent, specialization, research_interval):
+    """Register a talent for autonomous operation"""
+
+    click.echo(f"📝 Registering {talent} for autonomous operation...")
+
+    async def _register():
+        global autonomous_orchestrator
+        if not autonomous_orchestrator:
+            autonomous_orchestrator = AutonomousTalentOrchestrator()
+
+        config = {
+            "research_interval_hours": research_interval,
+            "autonomous_enabled": True,
+            "auto_upload": True,
+        }
+
+        await autonomous_orchestrator.register_talent(talent, specialization, config)
+        click.echo(f"✅ {talent} registered for autonomous operation")
+
+    asyncio.run(_register())
+
+
+@autonomous.command()
+def start():
+    """Start autonomous operation for all registered talents"""
+
+    click.echo("🚀 Starting autonomous talent operation...")
+
+    async def _start():
+        global autonomous_orchestrator
+        if not autonomous_orchestrator:
+            click.echo("❌ No talents registered. Use 'autonomous register' first.")
+            return
+
+        # Start autonomous operation (this will run indefinitely)
+        await autonomous_orchestrator.start_autonomous_operation()
+
+    try:
+        asyncio.run(_start())
+    except KeyboardInterrupt:
+        click.echo("\n⏹️ Autonomous operation stopped by user")
+
+
+@autonomous.command()
+@click.option("--talent", help="Specific talent name (optional)")
+def status(talent):
+    """Check autonomous operation status"""
+
+    async def _status():
+        global autonomous_orchestrator
+        if not autonomous_orchestrator:
+            click.echo("❌ Autonomous orchestrator not initialized")
+            return
+
+        status_data = await autonomous_orchestrator.get_talent_status(talent)
+
+        if talent:
+            click.echo(f"📊 Status for {talent}:")
+            click.echo(f"   Status: {status_data.get('status', 'Unknown')}")
+            click.echo(f"   Queue: {status_data.get('queue_length', 0)} items")
+            click.echo(f"   Running: {status_data.get('running_jobs', 0)} jobs")
+            click.echo(f"   Completed today: {status_data.get('completed_today', 0)}")
+
+            if status_data.get("next_scheduled"):
+                click.echo(f"   Next scheduled: {status_data['next_scheduled']}")
+        else:
+            click.echo("📊 Overall Autonomous Status:")
+            click.echo(
+                f"   Orchestrator running: {status_data.get('orchestrator_running', False)}"
+            )
+            click.echo(f"   Total talents: {status_data.get('total_talents', 0)}")
+            click.echo(f"   Active talents: {status_data.get('active_talents', 0)}")
+            click.echo(f"   Queue length: {status_data.get('total_queue', 0)}")
+            click.echo(f"   Running jobs: {status_data.get('running_jobs', 0)}")
+            click.echo(f"   Completed today: {status_data.get('completed_today', 0)}")
+
+            if status_data.get("talents"):
+                click.echo(
+                    f"   Registered talents: {', '.join(status_data['talents'])}"
+                )
+
+    asyncio.run(_status())
+
+
+@autonomous.command()
+@click.option("--talent", required=True, help="Talent name")
+def research(talent):
+    """Trigger manual research for a talent"""
+
+    click.echo(f"🔍 Starting research for {talent}...")
+
+    async def _research():
+        # Get talent specialization (you'll need to implement this lookup)
+        specialization = "tech_education"  # Default for Alex
+
+        async with AutonomousResearcher(specialization) as researcher:
+            topics = await researcher.research_trending_topics(limit=20)
+
+        click.echo(f"📊 Found {len(topics)} trending topics:")
+
+        for i, topic in enumerate(topics[:10], 1):
+            click.echo(f"  {i:2d}. {topic.title[:80]}...")
+            click.echo(f"      Source: {topic.source}")
+            click.echo(f"      Score: {topic.content_potential:.2f}")
+            click.echo(f"      Category: {topic.category}")
+            click.echo()
+
+    asyncio.run(_research())
+
+
+@autonomous.command()
+@click.option("--talent", required=True, help="Talent name")
+def generate_now(talent):
+    """Generate content immediately for a talent"""
+
+    click.echo(f"🎬 Generating autonomous content for {talent}...")
+
+    async def _generate():
+        from core.pipeline.enhanced_content_pipeline import EnhancedContentPipeline
+
+        pipeline = EnhancedContentPipeline()
+
+        # Generate content autonomously (no topic provided)
+        result = await pipeline.create_enhanced_content(
+            talent_name=talent,
+            topic=None,  # Let it pick autonomously
+            content_type="long_form",
+            auto_upload=True,
+        )
+
+        if result.get("success"):
+            click.echo("✅ Autonomous content generated successfully!")
+            click.echo(f"📖 Title: {result.get('title')}")
+            click.echo(f"🎥 Video: {result.get('video_path')}")
+            click.echo(f"📺 YouTube: {result.get('youtube_url', 'Not uploaded')}")
+            click.echo(f"🤖 Research-driven: {result.get('research_driven', False)}")
+        else:
+            click.echo(f"❌ Generation failed: {result.get('error')}")
+
+    asyncio.run(_generate())
+
+
+# Quick setup command for Alex
+@cli.command()
+def setup_alex_autonomous():
+    """Quick setup for Alex's autonomous operation"""
+
+    click.echo("🤖 Setting up Alex for full autonomous operation...")
+
+    async def _setup():
+        global autonomous_orchestrator
+        autonomous_orchestrator = AutonomousTalentOrchestrator()
+
+        # Register Alex
+        alex_config = {
+            "research_interval_hours": 12,  # Research twice daily
+            "autonomous_enabled": True,
+            "auto_upload": True,
+            "content_frequency": 0.5,  # Every 2 days
+            "quality_threshold": 0.6,
+        }
+
+        await autonomous_orchestrator.register_talent(
+            "Alex CodeMaster", "tech_education", alex_config
+        )
+
+        click.echo("✅ Alex registered for autonomous operation")
+        click.echo("🔍 Starting initial research...")
+
+        # Test research
+        async with AutonomousResearcher("tech_education") as researcher:
+            topics = await researcher.research_trending_topics(limit=10)
+
+        click.echo(f"📊 Found {len(topics)} trending topics for Alex")
+
+        if topics:
+            click.echo("🎯 Top 3 topics Alex could cover:")
+            for i, topic in enumerate(topics[:3], 1):
+                click.echo(
+                    f"  {i}. {topic.title[:60]}... (Score: {topic.content_potential:.2f})"
+                )
+
+        click.echo("\n🚀 Alex is now ready for autonomous operation!")
+        click.echo(
+            "Run 'python cli.py autonomous start' to begin autonomous content creation"
+        )
+
+    asyncio.run(_setup())
 
 
 if __name__ == "__main__":
