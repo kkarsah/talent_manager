@@ -1,7 +1,7 @@
-# ============================================================================
-# AUTONOMOUS TALENT ORCHESTRATOR
 # core/autonomous/talent_orchestrator.py
-# ============================================================================
+"""
+Autonomous Talent Orchestrator
+"""
 
 import asyncio
 import logging
@@ -45,6 +45,9 @@ class AutonomousTalentOrchestrator:
     ):
         """Register a talent for autonomous operation"""
 
+        from core.research.autonomous_researcher import AutonomousResearcher
+        from core.strategy.autonomous_strategy import AutonomousContentStrategy
+
         talent_config = {
             "name": talent_name,
             "specialization": specialization,
@@ -66,19 +69,17 @@ class AutonomousTalentOrchestrator:
         logger.info("🚀 Starting autonomous talent operation...")
         self.is_running = True
 
-        # Start main autonomous loop
-        await asyncio.gather(
-            self._autonomous_research_loop(),
-            self._autonomous_creation_loop(),
-            self._job_queue_processor(),
-            return_exceptions=True,
-        )
-
-    async def stop_autonomous_operation(self):
-        """Stop autonomous operation"""
-
-        logger.info("⏹️ Stopping autonomous operation...")
-        self.is_running = False
+        try:
+            # Start main autonomous loop
+            await asyncio.gather(
+                self._autonomous_research_loop(),
+                self._autonomous_creation_loop(),
+                return_exceptions=True,
+            )
+        except KeyboardInterrupt:
+            logger.info("⏹️ Autonomous operation stopped by user")
+        finally:
+            self.is_running = False
 
     async def _autonomous_research_loop(self):
         """Continuously research new topics for all talents"""
@@ -95,9 +96,7 @@ class AutonomousTalentOrchestrator:
 
                         # Perform research
                         async with talent_config["researcher"] as researcher:
-                            topics = await researcher.research_trending_topics(
-                                limit=100
-                            )
+                            topics = await researcher.research_trending_topics(limit=50)
 
                         # Create content strategy
                         strategy = await talent_config[
@@ -129,24 +128,17 @@ class AutonomousTalentOrchestrator:
                 current_time = datetime.now()
 
                 # Check for scheduled content
-                for talent_name, talent_config in self.active_talents.items():
-                    if not talent_config["content_creation_enabled"]:
-                        continue
+                ready_jobs = [
+                    job
+                    for job in self.job_queue
+                    if (
+                        job.scheduled_time <= current_time and job.status == "scheduled"
+                    )
+                ]
 
-                    # Look for jobs ready to execute
-                    ready_jobs = [
-                        job
-                        for job in self.job_queue
-                        if (
-                            job.talent_name == talent_name
-                            and job.scheduled_time <= current_time
-                            and job.status == "scheduled"
-                        )
-                    ]
-
-                    for job in ready_jobs:
-                        if len(self.running_jobs) < 3:  # Limit concurrent jobs
-                            await self._execute_content_job(job)
+                for job in ready_jobs[:2]:  # Limit concurrent jobs
+                    if job.job_id not in self.running_jobs:
+                        await self._execute_content_job(job)
 
                 # Wait before next check
                 await asyncio.sleep(300)  # Check every 5 minutes
@@ -154,38 +146,6 @@ class AutonomousTalentOrchestrator:
             except Exception as e:
                 logger.error(f"❌ Creation loop error: {e}")
                 await asyncio.sleep(300)
-
-    async def _job_queue_processor(self):
-        """Process the job queue and manage job lifecycle"""
-
-        while self.is_running:
-            try:
-                # Clean up completed jobs
-                completed_job_ids = [
-                    job_id
-                    for job_id, job in self.running_jobs.items()
-                    if job.status in ["completed", "failed"]
-                ]
-
-                for job_id in completed_job_ids:
-                    completed_job = self.running_jobs.pop(job_id)
-                    self.completed_jobs.append(completed_job)
-
-                    # Keep only last 100 completed jobs
-                    if len(self.completed_jobs) > 100:
-                        self.completed_jobs = self.completed_jobs[-100:]
-
-                # Log status
-                if self.running_jobs or self.job_queue:
-                    logger.info(
-                        f"📊 Jobs - Queue: {len(self.job_queue)}, Running: {len(self.running_jobs)}, Completed: {len(self.completed_jobs)}"
-                    )
-
-                await asyncio.sleep(60)  # Check every minute
-
-            except Exception as e:
-                logger.error(f"❌ Job processor error: {e}")
-                await asyncio.sleep(60)
 
     def _should_research(self, talent_config: Dict[str, Any]) -> bool:
         """Check if talent should perform new research"""
@@ -216,9 +176,6 @@ class AutonomousTalentOrchestrator:
 
             self.job_queue.append(job)
 
-        # Sort queue by priority and schedule time
-        self.job_queue.sort(key=lambda x: (x.priority, x.scheduled_time), reverse=True)
-
     async def _execute_content_job(self, job: AutonomousJob):
         """Execute a content creation job"""
 
@@ -245,7 +202,6 @@ class AutonomousTalentOrchestrator:
                 topic=job.topic,
                 content_type=job.content_type,
                 auto_upload=True,
-                research_context=job.research_data,
             )
 
             # Update job with results
@@ -257,12 +213,6 @@ class AutonomousTalentOrchestrator:
                 logger.info(
                     f"✅ Autonomous content completed: {job.talent_name} - {result.get('title')}"
                 )
-
-                # Update talent's last content time
-                if job.talent_name in self.active_talents:
-                    self.active_talents[job.talent_name][
-                        "last_content"
-                    ] = datetime.now()
             else:
                 logger.error(
                     f"❌ Autonomous content failed: {job.talent_name} - {result.get('error')}"
@@ -274,6 +224,11 @@ class AutonomousTalentOrchestrator:
             job.status = "failed"
             job.error = str(e)
             job.completed_at = datetime.now()
+        finally:
+            # Move to completed
+            if job.job_id in self.running_jobs:
+                self.running_jobs.pop(job.job_id)
+                self.completed_jobs.append(job)
 
     async def get_talent_status(
         self, talent_name: Optional[str] = None
@@ -294,9 +249,6 @@ class AutonomousTalentOrchestrator:
                 for job in self.running_jobs.values()
                 if job.talent_name == talent_name
             ]
-            talent_completed = [
-                job for job in self.completed_jobs if job.talent_name == talent_name
-            ]
 
             return {
                 "talent": talent_name,
@@ -304,17 +256,8 @@ class AutonomousTalentOrchestrator:
                     "active" if talent_config["content_creation_enabled"] else "paused"
                 ),
                 "last_research": talent_config["last_research"],
-                "last_content": talent_config["last_content"],
                 "queue_length": len(talent_jobs),
                 "running_jobs": len(talent_running),
-                "completed_today": len(
-                    [
-                        j
-                        for j in talent_completed
-                        if j.completed_at
-                        and j.completed_at.date() == datetime.now().date()
-                    ]
-                ),
                 "next_scheduled": (
                     talent_jobs[0].scheduled_time if talent_jobs else None
                 ),
@@ -333,13 +276,5 @@ class AutonomousTalentOrchestrator:
                 ),
                 "total_queue": len(self.job_queue),
                 "running_jobs": len(self.running_jobs),
-                "completed_today": len(
-                    [
-                        j
-                        for j in self.completed_jobs
-                        if j.completed_at
-                        and j.completed_at.date() == datetime.now().date()
-                    ]
-                ),
                 "talents": list(self.active_talents.keys()),
             }

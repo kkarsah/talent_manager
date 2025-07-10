@@ -1,3 +1,4 @@
+from datetime import datetime
 # cli.py - COMPLETELY FIXED VERSION
 """
 Talent Manager CLI - Fixed to eliminate ALL circular imports and add Alex commands
@@ -10,6 +11,9 @@ import asyncio
 from dotenv import load_dotenv
 from pathlib import Path
 from sqlalchemy.orm import Session
+import json
+from datetime import datetime
+
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -675,6 +679,66 @@ def config():
 autonomous_orchestrator = None
 
 
+def get_or_create_orchestrator():
+    """Get or create the autonomous orchestrator with persistent config"""
+    global autonomous_orchestrator
+
+    if not autonomous_orchestrator:
+        from core.autonomous.talent_orchestrator import AutonomousTalentOrchestrator
+
+        autonomous_orchestrator = AutonomousTalentOrchestrator()
+
+        # Load persistent talent registrations
+        config_file = Path("autonomous_config.json")
+        if config_file.exists():
+            try:
+                with open(config_file, "r") as f:
+                    config = json.load(f)
+
+                for talent_name, talent_config in config.get("talents", {}).items():
+                    asyncio.run(
+                        autonomous_orchestrator.register_talent(
+                            talent_name,
+                            talent_config["specialization"],
+                            talent_config["config"],
+                        )
+                    )
+
+                print(f"✅ Loaded {len(config.get('talents', {}))} talents from config")
+            except Exception as e:
+                print(f"⚠️ Warning: Could not load config: {e}")
+
+    return autonomous_orchestrator
+
+
+def save_talent_config(talent_name: str, specialization: str, config: dict):
+    """Save talent configuration persistently"""
+    config_file = Path("autonomous_config.json")
+
+    # Load existing config
+    autonomous_config = {}
+    if config_file.exists():
+        try:
+            with open(config_file, "r") as f:
+                autonomous_config = json.load(f)
+        except:
+            autonomous_config = {}
+
+    # Update with new talent
+    if "talents" not in autonomous_config:
+        autonomous_config["talents"] = {}
+
+    autonomous_config["talents"][talent_name] = {
+        "specialization": specialization,
+        "config": config,
+        "registered_at": datetime.now().isoformat(),
+    }
+
+    # Save config
+    with open(config_file, "w") as f:
+        json.dump(autonomous_config, f, indent=2)
+
+
 @cli.group()
 def autonomous():
     """Autonomous talent management commands"""
@@ -691,9 +755,7 @@ def register(talent, specialization, research_interval):
     click.echo(f"📝 Registering {talent} for autonomous operation...")
 
     async def _register():
-        global autonomous_orchestrator
-        if not autonomous_orchestrator:
-            autonomous_orchestrator = AutonomousTalentOrchestrator()
+        orchestrator = get_or_create_orchestrator()
 
         config = {
             "research_interval_hours": research_interval,
@@ -701,7 +763,11 @@ def register(talent, specialization, research_interval):
             "auto_upload": True,
         }
 
-        await autonomous_orchestrator.register_talent(talent, specialization, config)
+        await orchestrator.register_talent(talent, specialization, config)
+
+        # Save persistently
+        save_talent_config(talent, specialization, config)
+
         click.echo(f"✅ {talent} registered for autonomous operation")
 
     asyncio.run(_register())
@@ -714,13 +780,20 @@ def start():
     click.echo("🚀 Starting autonomous talent operation...")
 
     async def _start():
-        global autonomous_orchestrator
-        if not autonomous_orchestrator:
-            click.echo("❌ No talents registered. Use 'autonomous register' first.")
+        orchestrator = get_or_create_orchestrator()
+
+        if not orchestrator.active_talents:
+            click.echo("❌ No talents registered.")
+            click.echo("💡 Run 'python cli.py setup-alex-autonomous' first")
             return
 
-        # Start autonomous operation (this will run indefinitely)
-        await autonomous_orchestrator.start_autonomous_operation()
+        click.echo(
+            f"📊 Starting with {len(orchestrator.active_talents)} registered talents:"
+        )
+        for name in orchestrator.active_talents.keys():
+            click.echo(f"   • {name}")
+
+        await orchestrator.start_autonomous_operation()
 
     try:
         asyncio.run(_start())
@@ -734,19 +807,19 @@ def status(talent):
     """Check autonomous operation status"""
 
     async def _status():
-        global autonomous_orchestrator
-        if not autonomous_orchestrator:
-            click.echo("❌ Autonomous orchestrator not initialized")
-            return
+        orchestrator = get_or_create_orchestrator()
 
-        status_data = await autonomous_orchestrator.get_talent_status(talent)
+        status_data = await orchestrator.get_talent_status(talent)
 
         if talent:
+            if "error" in status_data:
+                click.echo(f"❌ {status_data['error']}")
+                return
+
             click.echo(f"📊 Status for {talent}:")
             click.echo(f"   Status: {status_data.get('status', 'Unknown')}")
             click.echo(f"   Queue: {status_data.get('queue_length', 0)} items")
             click.echo(f"   Running: {status_data.get('running_jobs', 0)} jobs")
-            click.echo(f"   Completed today: {status_data.get('completed_today', 0)}")
 
             if status_data.get("next_scheduled"):
                 click.echo(f"   Next scheduled: {status_data['next_scheduled']}")
@@ -759,7 +832,6 @@ def status(talent):
             click.echo(f"   Active talents: {status_data.get('active_talents', 0)}")
             click.echo(f"   Queue length: {status_data.get('total_queue', 0)}")
             click.echo(f"   Running jobs: {status_data.get('running_jobs', 0)}")
-            click.echo(f"   Completed today: {status_data.get('completed_today', 0)}")
 
             if status_data.get("talents"):
                 click.echo(
@@ -777,7 +849,8 @@ def research(talent):
     click.echo(f"🔍 Starting research for {talent}...")
 
     async def _research():
-        # Get talent specialization (you'll need to implement this lookup)
+        from core.research.autonomous_researcher import AutonomousResearcher
+
         specialization = "tech_education"  # Default for Alex
 
         async with AutonomousResearcher(specialization) as researcher:
@@ -807,7 +880,6 @@ def generate_now(talent):
 
         pipeline = EnhancedContentPipeline()
 
-        # Generate content autonomously (no topic provided)
         result = await pipeline.create_enhanced_content(
             talent_name=talent,
             topic=None,  # Let it pick autonomously
@@ -820,14 +892,12 @@ def generate_now(talent):
             click.echo(f"📖 Title: {result.get('title')}")
             click.echo(f"🎥 Video: {result.get('video_path')}")
             click.echo(f"📺 YouTube: {result.get('youtube_url', 'Not uploaded')}")
-            click.echo(f"🤖 Research-driven: {result.get('research_driven', False)}")
         else:
             click.echo(f"❌ Generation failed: {result.get('error')}")
 
     asyncio.run(_generate())
 
 
-# Quick setup command for Alex
 @cli.command()
 def setup_alex_autonomous():
     """Quick setup for Alex's autonomous operation"""
@@ -835,26 +905,29 @@ def setup_alex_autonomous():
     click.echo("🤖 Setting up Alex for full autonomous operation...")
 
     async def _setup():
-        global autonomous_orchestrator
-        autonomous_orchestrator = AutonomousTalentOrchestrator()
+        from core.research.autonomous_researcher import AutonomousResearcher
 
-        # Register Alex
+        # Register Alex with persistent config
         alex_config = {
-            "research_interval_hours": 12,  # Research twice daily
+            "research_interval_hours": 12,
             "autonomous_enabled": True,
             "auto_upload": True,
-            "content_frequency": 0.5,  # Every 2 days
+            "content_frequency": 0.5,
             "quality_threshold": 0.6,
         }
 
-        await autonomous_orchestrator.register_talent(
+        # Save the config persistently
+        save_talent_config("Alex CodeMaster", "tech_education", alex_config)
+
+        # Register with orchestrator
+        orchestrator = get_or_create_orchestrator()
+        await orchestrator.register_talent(
             "Alex CodeMaster", "tech_education", alex_config
         )
 
         click.echo("✅ Alex registered for autonomous operation")
         click.echo("🔍 Starting initial research...")
 
-        # Test research
         async with AutonomousResearcher("tech_education") as researcher:
             topics = await researcher.research_trending_topics(limit=10)
 
