@@ -153,3 +153,4 @@ Thumbs.db
 # Docker
 .dockerignorecredentials/youtube_credentials.json
 .credentials/
+credentials/*.json
