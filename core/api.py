@@ -5,8 +5,9 @@ Contains main system endpoints
 """
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from sqlalchemy.orm import Session
 from typing import List, Optional
+from sqlalchemy.orm import Session
+from sqlalchemy import text
 from pydantic import BaseModel
 import logging
 
@@ -78,7 +79,7 @@ def health_check(db: Session = Depends(get_db)):
     """Health check endpoint"""
     try:
         # Test database connection
-        db.execute("SELECT 1")
+        db.execute(text("SELECT 1"))
         db_status = True
     except Exception as e:
         logger.error(f"Database health check failed: {e}")
@@ -318,7 +319,7 @@ def test_database_connection(db: Session = Depends(get_db)):
     """Test database connection and operations"""
     try:
         # Test basic query
-        result = db.execute("SELECT COUNT(*) FROM talents").fetchone()
+        result = db.execute(text("SELECT COUNT(*) FROM talents")).fetchone()
         talent_count = result[0] if result else 0
 
         return {
