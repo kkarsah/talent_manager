@@ -137,12 +137,12 @@ async def test_scene_parsing():
         Alex CodeMaster: "The future of computing is quantum, and the future is now! Subscribe to stay ahead of the quantum revolution!"
         """
 
-        scenes = await creator._parse_script_into_scenes(test_script, "Alex CodeMaster")
+        scenes = creator._parse_script_into_scenes(test_script, "Alex CodeMaster")
 
         print(f"✅ Parsed {len(scenes)} scenes:")
         for i, scene in enumerate(scenes, 1):
-            print(f"   Scene {i}: {scene['spoken_content'][:50]}...")
-            print(f"            {scene['scene_description'][:60]}...")
+            print(f"   Scene {i}: {scene.text[:50]}...")
+            print(f"            {scene.text[:60]}...")
 
         return len(scenes) > 0
 
@@ -314,9 +314,7 @@ async def run_complete_test():
         # Update pipeline integration
         print("\n🔧 To use in production:")
         print("   Update your enhanced_content_pipeline.py to use:")
-        print(
-            "   from core.content.enhanced_video_creator import SceneBasedVideoCreator"
-        )
+        print("   from core.content.enhanced_video_creator import SceneBasedVideoCreator")
 
     elif passed >= 3:
         print("⚠️ Partial success - basic functionality working")
@@ -353,7 +351,7 @@ async def integrate_with_alex():
             scene_creator = SceneBasedVideoCreator()
             
             video_path = await scene_creator.create_video_from_scenes(
-                generated_content.script,
+                generated_content.text,
                 audio_path,
                 generated_content.title,
                 content_type,
@@ -371,7 +369,7 @@ async def integrate_with_alex():
             logger.warning(f"Scene creation failed, using fallback: {e}")
             # Fallback to regular video creator
             video_path = await self.video_creator.create_video(
-                generated_content.script,
+                generated_content.text,
                 audio_path, 
                 generated_content.title,
                 content_type,
