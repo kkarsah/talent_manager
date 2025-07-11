@@ -314,7 +314,9 @@ async def run_complete_test():
         # Update pipeline integration
         print("\n🔧 To use in production:")
         print("   Update your enhanced_content_pipeline.py to use:")
-        print("   from core.content.enhanced_video_creator import SceneBasedVideoCreator")
+        print(
+            "   from core.content.enhanced_video_creator import SceneBasedVideoCreator"
+        )
 
     elif passed >= 3:
         print("⚠️ Partial success - basic functionality working")

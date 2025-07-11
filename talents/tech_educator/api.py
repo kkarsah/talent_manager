@@ -225,3 +225,76 @@ async def _save_alex_content_record(result: dict):
 
     except Exception as e:
         logger.error(f"Error saving Alex content to database: {e}")
+
+
+async def process_alex_enhanced_content(
+    topic: str, content_type: str, auto_upload: bool, use_runway: bool
+):
+    """Process Alex content generation in background"""
+    try:
+        if not enhanced_pipeline:
+            logger.error("Enhanced pipeline not available")
+            return
+
+        result = await enhanced_pipeline.create_enhanced_content(
+            talent_name="alex",
+            topic=topic,
+            content_type=content_type,
+            auto_upload=auto_upload,
+            use_runway=use_runway,
+        )
+
+        if result.get("success"):
+            logger.info(f"✅ Alex content completed: {result['title']}")
+            await _save_alex_content_record(result)
+        else:
+            logger.error(f"❌ Alex content failed: {result.get('error')}")
+
+    except Exception as e:
+        logger.error(f"❌ Alex content generation error: {e}")
+
+
+async def _save_alex_content_record(result: dict):
+    """Save Alex content to database"""
+    try:
+        from core.database.config import SessionLocal
+        from .models import AlexContent
+        from datetime import datetime
+
+        db = SessionLocal()
+        try:
+            content = AlexContent(
+                title=result.get("title"),
+                description=result.get("description"),
+                topic=result.get("topic"),
+                content_type=result.get("content_type"),
+                video_path=result.get("video_path"),
+                audio_path=result.get("audio_path"),
+                status="completed" if result.get("success") else "failed",
+            )
+            db.add(content)
+            db.commit()
+            logger.info(f"💾 Alex content saved to database")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Database save error: {e}")
+
+
+def setup_alex_integration(app: FastAPI):
+    """Set up Alex CodeMaster integration - FIXED VERSION"""
+    try:
+        from core.pipeline.enhanced_content_pipeline import EnhancedContentPipeline
+
+        # Initialize enhanced pipeline
+        pipeline = EnhancedContentPipeline()
+
+        # Initialize Alex API with the pipeline
+        init_alex_api(pipeline)
+
+        logger.info("✅ Alex CodeMaster integration setup complete")
+        return pipeline
+
+    except ImportError as e:
+        logger.warning(f"Alex integration not available: {e}")
+        return None
