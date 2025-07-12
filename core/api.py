@@ -5,7 +5,7 @@ Contains main system endpoints
 """
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from typing import List, Optional
+from typing import List, Optional, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel
@@ -39,6 +39,18 @@ class TalentResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+    @classmethod
+    def from_orm(cls, talent):
+        """Custom method to handle datetime serialization"""
+        return cls(
+            id=talent.id,
+            name=talent.name,
+            specialization=talent.specialization,
+            personality=talent.personality,
+            is_active=talent.is_active,
+            created_at=talent.created_at.isoformat() if talent.created_at else "",
+        )
 
 
 class ContentItemResponse(BaseModel):
@@ -114,11 +126,25 @@ def system_status(db: Session = Depends(get_db)):
 
 
 # Talent management endpoints
-@router.get("/talents", response_model=List[TalentResponse], tags=["Talents"])
+@router.get("/talents", tags=["Talents"])
 def list_talents(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     """List all talents"""
     talents = db.query(Talent).offset(skip).limit(limit).all()
-    return talents
+
+    # Manual serialization to handle datetime
+    talent_list = []
+    for talent in talents:
+        talent_dict = {
+            "id": talent.id,
+            "name": talent.name,
+            "specialization": talent.specialization,
+            "personality": talent.personality,
+            "is_active": talent.is_active,
+            "created_at": talent.created_at.isoformat() if talent.created_at else "",
+        }
+        talent_list.append(talent_dict)
+
+    return {"talents": talent_list}
 
 
 @router.post("/talents", response_model=dict, tags=["Talents"])
@@ -163,7 +189,7 @@ def get_talent(talent_id: int, db: Session = Depends(get_db)):
             "specialization": talent.specialization,
             "personality": talent.personality,
             "is_active": talent.is_active,
-            "created_at": talent.created_at.isoformat() if talent.created_at else None,
+            "created_at": talent.created_at.isoformat() if talent.created_at else "",
         }
     }
 
@@ -183,7 +209,7 @@ def delete_talent(talent_id: int, db: Session = Depends(get_db)):
 
 
 # Content management endpoints
-@router.get("/content", response_model=List[ContentItemResponse], tags=["Content"])
+@router.get("/content", tags=["Content"])
 def list_content(
     talent_id: Optional[int] = None,
     platform: Optional[str] = None,
@@ -204,6 +230,83 @@ def list_content(
 
     content_items = query.offset(skip).limit(limit).all()
     return content_items
+
+
+# Pydantic model for content creation
+class ContentCreate(BaseModel):
+    talent_id: int
+    title: str
+    topic: Optional[str] = None
+    content_type: str = "long_form"
+    platform: str = "youtube"
+    generate_video: bool = False
+
+
+@router.post("/content", tags=["Content"])
+def create_content(content_data: ContentCreate, db: Session = Depends(get_db)):
+    """Create new content item with optional script generation"""
+    try:
+        # Validate talent exists
+        talent = db.query(Talent).filter(Talent.id == content_data.talent_id).first()
+        if not talent:
+            raise HTTPException(status_code=404, detail="Talent not found")
+
+        # Create content item
+        db_content = ContentItem(
+            talent_id=content_data.talent_id,
+            title=content_data.title,
+            description=content_data.topic or f"Content about {content_data.title}",
+            content_type=content_data.content_type,
+            platform=content_data.platform,
+            status="draft",
+        )
+
+        # Generate script if requested
+        if content_data.topic:
+            try:
+                # Simple script generation for testing
+                script = f"""
+[Opening: Introduction]
+Welcome! Today we're learning about {content_data.topic}.
+
+[Main: Content] 
+{content_data.topic} is an important topic in {talent.specialization}.
+Let me explain the key concepts and practical applications.
+
+[Closing: Conclusion]
+That's a wrap on {content_data.topic}! Thanks for watching!
+"""
+                db_content.script = script
+                db_content.status = "script_ready"
+
+            except Exception as e:
+                logger.warning(f"Script generation failed: {e}")
+                db_content.script = f"Script for: {content_data.title}"
+
+        db.add(db_content)
+        db.commit()
+        db.refresh(db_content)
+
+        return {
+            "message": "Content created successfully",
+            "content": {
+                "id": db_content.id,
+                "title": db_content.title,
+                "description": db_content.description,
+                "script": db_content.script,
+                "content_type": db_content.content_type,
+                "platform": db_content.platform,
+                "status": db_content.status,
+                "talent_id": db_content.talent_id,
+                "created_at": (
+                    db_content.created_at.isoformat() if db_content.created_at else ""
+                ),
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Content creation failed: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/content/{content_id}", tags=["Content"])
