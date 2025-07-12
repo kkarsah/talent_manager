@@ -1,16 +1,15 @@
-# core/pipeline/enhanced_content_pipeline.py - CLEAN WORKING VERSION
+# Simple working version without syntax issues
 import asyncio
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from datetime import datetime
 import json
 
 logger = logging.getLogger(__name__)
 
-
 class EnhancedContentPipeline:
-    """Enhanced content pipeline - WORKING VERSION"""
-
+    """Simple enhanced content pipeline that works"""
+    
     def __init__(self):
         self._tts_service = None
         self._content_generator = None
@@ -47,19 +46,17 @@ class EnhancedContentPipeline:
         topic: str = None,
         content_type: str = "long_form",
         auto_upload: bool = False,
-        use_runway: bool = False,
-        research_context: Optional[Dict[str, Any]] = None,
         use_cogvideox: Optional[bool] = None,
         force_static: bool = False
     ) -> Dict[str, Any]:
-        """Enhanced content creation - WORKING VERSION"""
-
+        """Create enhanced content - working version"""
+        
         job_id = f"enhanced_{talent_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-
+        
         try:
             logger.info(f"🎬 Starting enhanced content creation for {talent_name}")
 
-            # Generate content
+            # Generate content using existing pipeline
             from core.content.generator import ContentRequest
             content_request = ContentRequest(
                 talent_name=talent_name, 
@@ -83,7 +80,7 @@ class EnhancedContentPipeline:
                 tts_script, voice_settings, f"enhanced_audio_{job_id}.mp3"
             )
 
-            # Create video
+            # Create video using existing creator
             video_path = await self.video_creator.create_video(
                 generated_content.script,
                 audio_path,
@@ -92,9 +89,9 @@ class EnhancedContentPipeline:
                 talent_name,
             )
 
-            # Determine method
+            # Return result
             method = "static_scenes" if force_static else "enhanced_scenes"
-
+            
             result = {
                 "success": True,
                 "job_id": job_id,
@@ -104,9 +101,8 @@ class EnhancedContentPipeline:
                 "video_path": video_path,
                 "audio_path": audio_path,
                 "video_creation_method": method,
-                "upload_result": None,
                 "enhanced": True,
-                "duration": 0,  # Will calculate if needed
+                "duration": 0,  # Will be calculated if needed
                 "timestamp": datetime.now().isoformat()
             }
 
@@ -123,13 +119,16 @@ class EnhancedContentPipeline:
                 "timestamp": datetime.now().isoformat()
             }
 
-    def get_video_capabilities(self) -> Dict[str, Any]:
-        """Get video creation capabilities"""
+    def get_enhanced_capabilities(self) -> Dict[str, Any]:
+        """Get enhanced pipeline capabilities"""
         return {
-            "cogvideox_available": False,
-            "enhanced_scenes_available": True,
-            "fallback_available": True,
-            "cogvideox_enabled": False,
-            "cogvideox_content_types": [],
-            "current_method": "enhanced_scenes"
+            "enhanced_available": True,
+            "scene_service": {"available": False, "reason": "Integration in progress"},
+            "stitching_service": {"available": False, "reason": "Integration in progress"},
+            "current_method": "static_scenes",
+            "recommended_usage": {
+                "short_content": "Use static scenes (working)",
+                "long_content": "Use static scenes (working)", 
+                "promotional": "Use static scenes (working)"
+            }
         }
