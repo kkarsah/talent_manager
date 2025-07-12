@@ -13,17 +13,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Database URL configuration
-SQLALCHEMY_DATABASE_URL = os.getenv(
-    "DATABASE_URL", 
-    "sqlite:///./talent_manager.db"
-)
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./talent_manager.db")
 
 # Create engine
 if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
     engine = create_engine(
         SQLALCHEMY_DATABASE_URL,
         connect_args={"check_same_thread": False},
-        echo=False  # Set to True for SQL debugging
+        echo=False,  # Set to True for SQL debugging
     )
 else:
     engine = create_engine(SQLALCHEMY_DATABASE_URL, echo=False)
@@ -34,6 +31,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # Create Base class for models
 Base = declarative_base()
 
+
 def get_db():
     """Dependency to get database session"""
     db = SessionLocal()
@@ -42,10 +40,13 @@ def get_db():
     finally:
         db.close()
 
+
 def init_db():
     """Initialize database - create all tables"""
     from .models import Base
+
     Base.metadata.create_all(bind=engine)
+
 
 def test_db_connection():
     """Test database connection"""
@@ -59,25 +60,24 @@ def test_db_connection():
         print(f"Database connection test failed: {e}")
         return False
 
+
 def get_db_info():
     """Get database information"""
     try:
         db = SessionLocal()
-        
+
         # Get table count using text()
-        table_result = db.execute(text("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")).fetchone()
+        table_result = db.execute(
+            text("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
+        ).fetchone()
         table_count = table_result[0] if table_result else 0
-        
+
         db.close()
-        
+
         return {
             "url": SQLALCHEMY_DATABASE_URL,
             "engine": str(engine),
-            "table_count": table_count
+            "table_count": table_count,
         }
     except Exception as e:
-        return {
-            "url": SQLALCHEMY_DATABASE_URL,
-            "engine": str(engine),
-            "error": str(e)
-        }
+        return {"url": SQLALCHEMY_DATABASE_URL, "engine": str(engine), "error": str(e)}
