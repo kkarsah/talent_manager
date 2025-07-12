@@ -2,9 +2,10 @@
 Improve script cleaner to better filter out production notes
 """
 
+
 def update_script_cleaner():
     """Update the script cleaner with better filtering"""
-    
+
     improved_cleaner = '''import re
 import json
 import logging
@@ -207,10 +208,11 @@ class ScriptCleaner:
 '''
 
     # Write the improved cleaner
-    with open('core/content/script_cleaner.py', 'w') as f:
+    with open("core/content/script_cleaner.py", "w") as f:
         f.write(improved_cleaner)
-    
+
     print("✅ Updated script cleaner to filter production notes")
+
 
 if __name__ == "__main__":
     update_script_cleaner()

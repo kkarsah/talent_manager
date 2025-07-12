@@ -14,7 +14,6 @@ from core.content.enhanced_scene_service import EnhancedSceneService
 from core.content.video_stitching_service import VideoStitchingService
 
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -58,17 +57,16 @@ class EnhancedContentPipeline:
     @property
     def scene_service(self):
         """Enhanced scene generation service"""
-        if not hasattr(self, '_scene_service') or self._scene_service is None:
+        if not hasattr(self, "_scene_service") or self._scene_service is None:
             self._scene_service = EnhancedSceneService()
         return self._scene_service
 
     @property
     def stitching_service(self):
         """Video stitching service"""
-        if not hasattr(self, '_stitching_service') or self._stitching_service is None:
+        if not hasattr(self, "_stitching_service") or self._stitching_service is None:
             self._stitching_service = VideoStitchingService()
         return self._stitching_service
-
 
     @property
     def scene_service(self):
@@ -379,19 +377,22 @@ class EnhancedContentPipeline:
             ),
         }
 
+
 # SERVICE INTEGRATION - ADD TO YOUR EXISTING CLASS
+
 
 # Add these properties to your EnhancedContentPipeline class
 @property
 def scene_service(self):
     """Enhanced scene generation service"""
-    if not hasattr(self, '_scene_service') or self._scene_service is None:
+    if not hasattr(self, "_scene_service") or self._scene_service is None:
         self._scene_service = EnhancedSceneService()
     return self._scene_service
 
-@property  
+
+@property
 def stitching_service(self):
     """Video stitching service"""
-    if not hasattr(self, '_stitching_service') or self._stitching_service is None:
+    if not hasattr(self, "_stitching_service") or self._stitching_service is None:
         self._stitching_service = VideoStitchingService()
     return self._stitching_service
